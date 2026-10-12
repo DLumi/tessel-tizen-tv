@@ -9,18 +9,26 @@ var I18n   = require('./helpers/i18n.js');
 
 var JS  = path.join(__dirname, '../../tizen-app/js/');
 var SRC = fs.readFileSync(JS + 'webdav.js', 'utf8');
+var SERVER_SRC = fs.readFileSync(JS + 'server.js', 'utf8');
 var STREAM = 'http://127.0.0.1:8127/dav/stream?srv=';
+var BOX    = 'http://192.168.1.20:8200';
 
 var NC  = { id: 'nc1', name: 'My Nextcloud', url: 'https://cloud.example.com/remote.php/dav/files/pat/', user: 'pat', pass: 'secret', insecure: false };
 var NAS = { id: 'nas1', name: '', url: 'http://192.168.1.5:5005/', user: 'tv', pass: 'pw', insecure: true };
 
-/* webdav.js against a fake background service and a fake Settings form. */
+/* webdav.js (and server.js when opts.box is set) against a fake background
+ * service, a fake transcode box and a fake Settings form.  opts.box is the
+ * box's API version; opts.probe answers /api/probe; opts.register answers
+ * /api/dav (default ok). */
 function load(opts) {
     opts = opts || {};
     var store = {};
     if (opts.servers) store.vlctv_webdav_v1 = JSON.stringify(opts.servers);
+    if (opts.box) store.vlctv_server_v1 = JSON.stringify({ url: BOX, token: 'tok', name: 'box', api: opts.box });
     var known = [];          // server ids the fake service holds
     var sent = [];
+    var registered = [];     // bodies posted to /api/dav
+    var probes = [];
     var picker = null, toasts = [];
     var inputs = {};
     ['name', 'url', 'user', 'pass'].forEach(function (k) { inputs['dav-' + k] = { value: '' }; });
@@ -34,7 +42,8 @@ function load(opts) {
         'dav-insecure-val': { textContent: '' }
     };
     function reply(x, status, body) {
-        x.status = status; x.responseText = JSON.stringify(body);
+        x.readyState = 4; x.status = status; x.responseText = typeof body === 'string' ? body : JSON.stringify(body);
+        if (x.onreadystatechange) x.onreadystatechange();
         if (x.onload) x.onload();
     }
     function FakeXHR() {}
@@ -50,13 +59,23 @@ function load(opts) {
             known.push(c.id);
             return reply(this, 200, { ok: true, auth: 'basic' });
         }
-        reply(this, 404, { ok: false });
+        if (/\/api\/dav\?token=tok$/.test(u)) {
+            registered.push(JSON.parse(body));
+            return reply(this, 200, opts.register || { ok: true });
+        }
+        if (/\/api\/probe\?/.test(u)) {
+            probes.push(u);
+            return reply(this, 200, opts.probe ? opts.probe(u) : { direct: false, reason: 'dts' });
+        }
+        reply(this, 404, 'not found');
     };
     var sandbox = {
         module: { exports: {} },
         Debug: { send: function () {} },
         I18n: I18n,
         SMB: { ensureService: function (cb) { sent.push('launch'); cb(null); } },
+        Settings: { get: function (k) { return k === 'smartRouting' ? opts.smart !== false : false; } },
+        Browser: { listRoots: function (cb) { cb(null, []); } },
         UI: { toast: function (m) { toasts.push(m); }, focusOn: function () {} },
         localStorage: {
             getItem: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
@@ -73,8 +92,16 @@ function load(opts) {
     };
     vm.createContext(sandbox);
     vm.runInContext(SRC + '\nvar W_ = WebDAV;', sandbox);
+    if (opts.box) vm.runInContext(SERVER_SRC + '\nvar TS_ = TranscodeServer;', sandbox);
     return {
-        W: sandbox.W_, store: store, sent: sent, toasts: toasts, known: known,
+        W: sandbox.W_, TS: sandbox.TS_, store: store, sent: sent, toasts: toasts, known: known,
+        registered: registered, probes: probes,
+        resolve: function (uri) {
+            var out = null;
+            sandbox.TS_.resolvePlaybackUri(uri, function (u, route) { out = { url: u, route: route || null }; });
+            assert.ok(out, 'resolver must call back synchronously with these stubs');
+            return out;
+        },
         saved: function () { return JSON.parse(store.vlctv_webdav_v1 || '[]'); },
         type: function (c) { for (var k in c) if (inputs['dav-' + k]) inputs['dav-' + k].value = String(c[k]); },
         toggleInsecure: function () { handlers.insecure(); },
@@ -199,4 +226,65 @@ test('the service\'s reason reaches the user in words', function () {
     var t2 = load({ servers: [NC], connect: function () { return { ok: false, code: 'other', error: 'HTTP 503' }; } });
     t2.W.ensureConnected('nc1', function (e) { msg = e.message; });
     assert.strictEqual(msg, 'HTTP 503');
+});
+
+/* ── through the transcode server (issue #145) ─────────────────────────── */
+
+var PLAY = BOX + '/play?dav=nc1&path=%2FFilms%2Fa.mkv&token=tok';
+
+test('a file plays through a paired box that knows WebDAV, else straight off the service', function () {
+    assert.strictEqual(load({ servers: [NC], box: 4 }).W.playableUrl('/Films/a.mkv', 'nc1'), PLAY);
+    assert.strictEqual(load({ servers: [NC], box: 3 }).W.playableUrl('/Films/a.mkv', 'nc1'), STREAM + 'nc1&path=%2FFilms%2Fa.mkv');
+    assert.strictEqual(load({ servers: [NC] }).W.playableUrl('/Films/a.mkv', 'nc1'), STREAM + 'nc1&path=%2FFilms%2Fa.mkv');
+    // A server the TV no longer has can't be named to the box.
+    assert.strictEqual(load({ servers: [NC], box: 4 }).W.playableUrl('/Films/a.mkv', 'gone'), STREAM + 'gone&path=%2FFilms%2Fa.mkv');
+});
+
+test('before a file plays through the box, the box is told about the server; the probe then decides', function () {
+    var t = load({ servers: [NC, NAS], box: 4, probe: function () { return { direct: false, reason: 'dts', video: 'h264', audio: 'dts' }; } });
+    var r = t.resolve(PLAY);
+    assert.strictEqual(r.url, PLAY);
+    assert.deepStrictEqual(plain(t.registered), [{ id: 'nc1', url: NC.url, user: 'pat', pass: 'secret', insecure: false }]);
+    assert.strictEqual(t.probes.length, 1);
+    assert.ok(/\/api\/probe\?dav=nc1&path=%2FFilms%2Fa\.mkv&token=tok$/.test(t.probes[0]), t.probes[0]);
+    assert.ok(t.sent.indexOf(BOX + '/api/dav?token=tok') < t.sent.indexOf(t.probes[0]), 'registered before probing');
+
+    // Remux-only: off the service, with the box as the fallback; the
+    // service is connected first.
+    var t2 = load({ servers: [NC], box: 4, probe: function () { return { direct: true, reason: 'remux only', video: 'h264', audio: 'aac' }; } });
+    var r2 = t2.resolve(PLAY);
+    assert.strictEqual(r2.url, STREAM + 'nc1&path=%2FFilms%2Fa.mkv');
+    assert.deepStrictEqual(plain(r2.route), { fallback: PLAY });
+    assert.deepStrictEqual(plain(t2.known), ['nc1']);
+
+    // The direct open failed on the TV: the box from now on, unprobed.
+    t2.TS.markDirectFailed(PLAY);
+    var r3 = t2.resolve(PLAY);
+    assert.strictEqual(r3.url, PLAY);
+    assert.strictEqual(t2.probes.length, 1);
+    assert.strictEqual(t2.registered.length, 2, 'registered again before the second play');
+});
+
+test('with smart routing off the box plays everything, once it knows the server', function () {
+    var t = load({ servers: [NC], box: 4, smart: false });
+    assert.strictEqual(t.resolve(PLAY).url, PLAY);
+    assert.strictEqual(t.registered.length, 1);
+    assert.strictEqual(t.probes.length, 0);
+});
+
+test('a box that refuses the address, or a server the TV no longer has, still gets a playable answer', function () {
+    var t = load({ servers: [NC], box: 4, register: { ok: false, error: 'the WebDAV address must be one the TV can reach too' } });
+    var r = t.resolve(PLAY);
+    assert.strictEqual(r.url, STREAM + 'nc1&path=%2FFilms%2Fa.mkv', 'falls back to the service');
+    assert.deepStrictEqual(plain(t.known), ['nc1']);
+    assert.strictEqual(t.probes.length, 0);
+
+    var t2 = load({ servers: [NAS], box: 4 });
+    assert.strictEqual(t2.resolve(PLAY).url, PLAY, 'the box URL untouched');
+    assert.strictEqual(t2.registered.length, 0);
+
+    // A share or a plain URL is none of WebDAV's business.
+    var t3 = load({ servers: [NC], box: 4, smart: false });
+    assert.strictEqual(t3.resolve('https://example.com/x.m3u8').url, 'https://example.com/x.m3u8');
+    assert.strictEqual(t3.registered.length, 0);
 });

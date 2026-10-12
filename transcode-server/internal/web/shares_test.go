@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/PatrickSt1991/tessel-tizen-tv/transcode-server/internal/config"
+	"github.com/PatrickSt1991/tessel-tizen-tv/transcode-server/internal/transcode"
 )
 
 func sharesServer() *Server {
@@ -42,11 +43,14 @@ func TestSourceForRefusesAShareThatIsNotSetUp(t *testing.T) {
 
 func TestRawURLNamesTheShareOnlyWhenItIsNotTheFirst(t *testing.T) {
 	s := sharesServer()
-	if u := s.RawURL("", "a b.mkv"); strings.Contains(u, "share=") {
+	if u := s.RawURL(transcode.SMBSource("", "a b.mkv")); strings.Contains(u, "share=") {
 		t.Fatalf("first share: %s", u)
 	}
-	if u := s.RawURL("ab12", "a.mkv"); !strings.HasSuffix(u, "&share=ab12") {
+	if u := s.RawURL(transcode.SMBSource("ab12", "a.mkv")); !strings.HasSuffix(u, "&share=ab12") {
 		t.Fatalf("extra share: %s", u)
+	}
+	if u := s.RawURL(transcode.DAVSource("nc1", "Films/a b.mkv")); u != "http://127.0.0.1:8200/raw?dav=nc1&path=Films/a%20b.mkv" {
+		t.Fatalf("webdav: %s", u)
 	}
 }
 

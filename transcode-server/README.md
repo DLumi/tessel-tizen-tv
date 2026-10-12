@@ -326,6 +326,32 @@ can't be used to make the box fetch from somewhere else.
 
 If either side is off, USB files simply play the way they always did.
 
+## WebDAV servers
+
+A WebDAV server the TV has in **Settings → WebDAV server** (Nextcloud, a NAS's
+WebDAV server, a cloud drive) gets the same treatment as a share: when a box is
+paired, the TV plays those files through it, and with smart routing on, only
+the files the box would do more than remux.
+
+This box keeps no WebDAV settings of its own. Right before it plays or probes a
+file there, the TV posts the server's address and credentials to `/api/dav`
+(pairing token required), and names the file by that server's id:
+
+```
+GET /play?dav=<id>&path=/Films/SomeMovie.mkv&token=<token>
+GET /api/probe?dav=<id>&path=/Films/SomeMovie.mkv&token=<token>
+```
+
+What the TV registers lives in memory for this run only — nothing is written
+to disk, and the TV registers again after the box restarts. The box fetches the
+file itself over HTTP(S) with Range requests, answering a Basic or Digest
+challenge the way the TV does, and accepting a self-signed certificate only
+when that server's toggle on the TV says so. An address that points at this
+box itself is refused: the TV has to be able to reach the same server to
+browse it. Needs the TV app 1.27.0 or later and a box reporting API 4 on
+`/api/hello`; an older box plays nothing from WebDAV and the TV streams those
+files off its own background service instead.
+
 ## Hardware acceleration
 
 The encoder is **auto-detected at startup** — it picks the fastest H.264 encoder

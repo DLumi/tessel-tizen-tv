@@ -148,6 +148,18 @@ var WebDAV = (function () {
         return BASE + '/dav/stream?srv=' + encodeURIComponent(srv) + '&path=' + encodeURIComponent(path);
     }
     function isStreamUrl(u) { return typeof u === 'string' && u.indexOf(BASE + '/dav/stream') === 0; }
+
+    /* The URL we actually play: through a paired transcode server that knows
+     * WebDAV (HLS, server-side decode of DTS/TrueHD and codecs the TV can't
+     * handle), else straight off the service.  Browsing is identical either
+     * way — only the bytes' origin changes. */
+    function playableUrl(path, srv) {
+        if (typeof TranscodeServer !== 'undefined' && TranscodeServer.isPaired() && TranscodeServer.davPlayUrl) {
+            var u = TranscodeServer.davPlayUrl(path, serverById(srv));
+            if (u) return u;
+        }
+        return streamUrl(path, srv);
+    }
     /* The server a stream URL reads from, or null when it isn't one of ours. */
     function streamServerOf(u) {
         if (!isStreamUrl(u)) return null;
@@ -209,9 +221,10 @@ var WebDAV = (function () {
             var playlist = entries
                 .filter(function (e) { return !e.isDir && FileTypes.isPlayable(e.name); })
                 .map(function (e) {
-                    var audio = FileTypes.kind(e.name) === 'audio', uri = streamUrl(join(path, e.name), srv);
-                    return { uri: uri, title: e.name, subtitles: sidecars[e.name] || [],
-                             tagSrc: audio ? uri : null, art: audio ? art : null };
+                    var audio = FileTypes.kind(e.name) === 'audio';
+                    return { uri: playableUrl(join(path, e.name), srv), title: e.name, subtitles: sidecars[e.name] || [],
+                             // Tags come off the server itself, not the box's HLS.
+                             tagSrc: audio ? streamUrl(join(path, e.name), srv) : null, art: audio ? art : null };
                 });
             var pictures = entries
                 .filter(function (e) { return !e.isDir && FileTypes.kind(e.name) === 'image'; })
@@ -251,11 +264,11 @@ var WebDAV = (function () {
                     if (typeof Favorites !== 'undefined' && Favorites.find(fav)) li.classList.add('is-fav');
                 }
                 if (focusName && e.name === focusName) focus = li;
-                if (!e.isDir && FileTypes.isPlayable(e.name)) li.dataset.uri = streamUrl(join(path, e.name), srv);
+                if (!e.isDir && FileTypes.isPlayable(e.name)) li.dataset.uri = playableUrl(join(path, e.name), srv);
                 li.addEventListener('click', function () {
                     if (e.isDir) { pathStack.push(path); render(join(path, e.name)); return; }
                     if (openOther(kind, e)) return;
-                    var uri = streamUrl(join(path, e.name), srv), idx = 0;
+                    var uri = playableUrl(join(path, e.name), srv), idx = 0;
                     for (var i = 0; i < playlist.length; i++) if (playlist[i].uri === uri) { idx = i; break; }
                     teardownBack();
                     if (window.VlcApp && window.VlcApp.play) window.VlcApp.play('webdav', playlist, idx, null, backHere(e.name));
@@ -295,7 +308,7 @@ var WebDAV = (function () {
                                 if (/^(https?|rtsp|rtmp|mms|udp|rtp):/i.test(ref)) return ref;
                                 if (/^[a-z][a-z0-9+.-]+:/i.test(ref)) return null;
                                 var p = SMB.sharePath(path, ref);
-                                return p ? streamUrl(p, srv) : null;
+                                return p ? playableUrl(p, srv) : null;
                             },
                             playAsStream: function () {
                                 window.VlcApp.play('webdav', [{ uri: streamUrl(file, srv), title: e.name }], 0);
@@ -528,6 +541,7 @@ var WebDAV = (function () {
         serverById:      serverById,
         serverLabel:     serverLabel,
         streamUrl:       streamUrl,
+        playableUrl:     playableUrl,      // exposed for the Node tests
         isStreamUrl:     isStreamUrl,
         streamServerOf:  streamServerOf,
         ensureConnected: ensureConnected,  // server.js, before a stream URL plays

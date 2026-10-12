@@ -25,6 +25,7 @@ import (
 	"github.com/PatrickSt1991/tessel-tizen-tv/transcode-server/internal/pair"
 	"github.com/PatrickSt1991/tessel-tizen-tv/transcode-server/internal/smb"
 	"github.com/PatrickSt1991/tessel-tizen-tv/transcode-server/internal/transcode"
+	"github.com/PatrickSt1991/tessel-tizen-tv/transcode-server/internal/webdav"
 )
 
 //go:embed static/*
@@ -47,6 +48,7 @@ type Server struct {
 	cfg  *config.Config
 	smb  *smb.Pool
 	mgr  *transcode.Manager
+	dav  *webdav.Registry // WebDAV servers the TVs registered this run (#145)
 	port int
 
 	mu         sync.Mutex
@@ -59,7 +61,7 @@ type Server struct {
 // The adopt window starts open: a box that has just been started is a box
 // someone is setting up, and that's the moment the TV pairs.
 func New(cfg *config.Config, pool *smb.Pool, mgr *transcode.Manager, port int) *Server {
-	return &Server{cfg: cfg, smb: pool, mgr: mgr, port: port, adoptUntil: time.Now().Add(adoptWindow)}
+	return &Server{cfg: cfg, smb: pool, mgr: mgr, dav: webdav.NewRegistry(), port: port, adoptUntil: time.Now().Add(adoptWindow)}
 }
 
 // openAdoptWindow (re)starts the window. Called on the events that mean "a human
@@ -85,12 +87,16 @@ func (s *Server) adoptSecondsLeft() int {
 // SetManager injects the transcode manager once it has been built.
 func (s *Server) SetManager(mgr *transcode.Manager) { s.mgr = mgr }
 
-// RawURL is the transcode.RawURLFunc: where ffmpeg reads an SMB file from.
-// 127.0.0.1 keeps the bridge off the LAN — only our own ffmpeg uses it.
-func (s *Server) RawURL(shareID, smbPath string) string {
-	u := fmt.Sprintf("http://127.0.0.1:%d/raw?path=%s", s.port, urlEscape(smbPath))
-	if shareID != "" {
-		u += "&share=" + url.QueryEscape(shareID)
+// RawURL is the transcode.RawURLFunc: where ffmpeg reads a share or WebDAV
+// file from. 127.0.0.1 keeps the bridge off the LAN — only our own ffmpeg
+// uses it.
+func (s *Server) RawURL(src transcode.Source) string {
+	if src.DAV != "" {
+		return fmt.Sprintf("http://127.0.0.1:%d/raw?dav=%s&path=%s", s.port, url.QueryEscape(src.DAV), urlEscape(src.DAVPath))
+	}
+	u := fmt.Sprintf("http://127.0.0.1:%d/raw?path=%s", s.port, urlEscape(src.SMBPath))
+	if src.Share != "" {
+		u += "&share=" + url.QueryEscape(src.Share)
 	}
 	return u
 }
@@ -114,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/adopt", s.handleAdopt) // hand the share settings to a paired TV
 	mux.HandleFunc("/api/allow-adopt", s.handleAllowAdopt)
 	mux.HandleFunc("/api/probe", s.handleProbe) // would /play only remux this file?
+	mux.HandleFunc("/api/dav", s.handleDav)     // a WebDAV server the TV will play from
 
 	// Media plane.
 	mux.HandleFunc("/raw", s.handleRaw)   // ffmpeg input (localhost only)
@@ -125,7 +132,8 @@ func (s *Server) Handler() http.Handler {
 
 // ── media plane ─────────────────────────────────────────────────────────────
 
-// handleRaw streams an SMB file with Range support so ffmpeg can seek it.
+// handleRaw streams an SMB or WebDAV file with Range support so ffmpeg can
+// seek it.
 //
 // RawURL only ever builds a 127.0.0.1 address, but "we only call it from
 // localhost" isn't the same as "only localhost can call it" — the handler is on
@@ -142,6 +150,10 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
+	if id := r.URL.Query().Get("dav"); id != "" {
+		s.rawDav(w, r, id, p)
+		return
+	}
 	c, err := s.smb.Get(r.URL.Query().Get("share"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -156,6 +168,64 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	// http.ServeContent handles Range, If-Range, and content-type sniffing using
 	// the seekable SMB handle.
 	http.ServeContent(w, r, filepath.Base(p), time.Time{}, f.File)
+}
+
+// rawDav is handleRaw for a WebDAV file: the server's own answer, Range and
+// all, passed through to ffmpeg.
+func (s *Server) rawDav(w http.ResponseWriter, r *http.Request, id, p string) {
+	c, ok := s.dav.Get(id)
+	if !ok {
+		http.Error(w, "unknown WebDAV server — the TV registers it before playing", http.StatusNotFound)
+		return
+	}
+	resp, err := c.Get(r.Context(), p, r.Header.Get("Range"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusPartialContent, http.StatusRequestedRangeNotSatisfiable:
+	default:
+		http.Error(w, "WebDAV server answered HTTP "+resp.Status, http.StatusBadGateway)
+		return
+	}
+	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+// handleDav registers a WebDAV server for this run (#145): the TV posts the
+// address and credentials it holds right before it plays or probes a file
+// there, and names it to /play and /api/probe by id. Nothing is persisted;
+// the TV is the keeper of the password and registers again after a restart.
+func (s *Server) handleDav(w http.ResponseWriter, r *http.Request) {
+	if !s.guard(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+		return
+	}
+	var in webdav.Server
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if in.IsLoopback() {
+		writeJSON(w, map[string]any{"ok": false, "error": "the WebDAV address must be one the TV can reach too, not this server's own loopback"})
+		return
+	}
+	if err := s.dav.Put(in); err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	log.Printf("webdav: registered %s (user %q)", in.Label(), in.User)
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handlePlay is the URL the TV hands to AVPlay. It ensures a transcode session,
@@ -246,11 +316,23 @@ func isLoopback(remoteAddr string) bool {
 //	                     TV names it the way it knows it, by host and share
 //	?src=http://<tv>/…   a file the TV is serving us — its USB drive or internal
 //	                     storage, relayed by the app's background service
+//	?dav=<id>&path=/Films/x.mkv
+//	                     a file on a WebDAV server the TV registered through
+//	                     /api/dav (#145)
 //
 // The src form only exists so USB files get the same treatment as share files.
 // It's off unless the user enables it, and the URL is validated below.
 func (s *Server) sourceFor(r *http.Request) (transcode.Source, error) {
 	q := r.URL.Query()
+	if id := q.Get("dav"); id != "" {
+		if q.Get("path") == "" {
+			return transcode.Source{}, errors.New("missing path")
+		}
+		if _, ok := s.dav.Get(id); !ok {
+			return transcode.Source{}, errors.New("unknown WebDAV server — the TV registers it before playing")
+		}
+		return transcode.DAVSource(id, q.Get("path")), nil
+	}
 	if raw := q.Get("src"); raw != "" {
 		if !s.cfg.LocalRelay {
 			return transcode.Source{}, errors.New("local relay is disabled — enable it on the server's setup page")
@@ -580,7 +662,9 @@ const AppID = "vlc-tv-transcode"
 //	2  /api/probe (smart routing)
 //	3  more than one share: /play and /api/probe take host+share, /api/adopt
 //	   also returns extra_smb
-const APIVersion = 3
+//	4  WebDAV: POST /api/dav registers a server, /play and /api/probe take
+//	   dav+path
+const APIVersion = 4
 
 // handleHello is the discovery probe: unauthenticated, cheap, and carrying no
 // secrets — just enough for a scanning TV to recognise us and show a name.

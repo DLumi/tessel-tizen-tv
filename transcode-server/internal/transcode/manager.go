@@ -25,10 +25,10 @@ const idleTimeout = 90 * time.Second
 // second ffprobe over SMB free.
 const probeTTL = 10 * time.Minute
 
-// RawURLFunc builds the internal HTTP URL ffmpeg should read for a path on the
-// share with the given ID. (Injected so this package doesn't import the
+// RawURLFunc builds the internal HTTP URL ffmpeg should read for a file on a
+// share or a WebDAV server. (Injected so this package doesn't import the
 // web/http layer.)
-type RawURLFunc func(shareID, smbPath string) string
+type RawURLFunc func(src Source) string
 
 // SurroundFunc reports the currently configured surround mode. It's a func
 // rather than a value because the setting is web-editable while the server
@@ -69,29 +69,35 @@ func NewManager(caps *Caps, workDir string, rawURL RawURLFunc, surround Surround
 	return m, nil
 }
 
-// Source is what one session reads from. Exactly one of SMBPath and URL is set:
-// SMBPath for a file on a configured share (bridged through /raw; Share is the
-// share's ID, "" for the first one), or URL for
-// a file the box can already fetch over HTTP — currently the TV's own USB/local
-// relay, so files sitting on a drive plugged into the TV get the same treatment
-// as files on the share.
+// Source is what one session reads from. Exactly one form is set: SMBPath for
+// a file on a configured share (bridged through /raw; Share is the share's ID,
+// "" for the first one); DAVPath for a file on a WebDAV server the TV
+// registered (bridged through /raw too; DAV is that server's id); or URL for a
+// file the box can already fetch over HTTP — the TV's own USB/local relay, so
+// files sitting on a drive plugged into the TV get the same treatment as files
+// on the share.
 type Source struct {
 	Share   string
 	SMBPath string
+	DAV     string
+	DAVPath string
 	URL     string
 }
 
-// SMBSource / HTTPSource are the two constructors, so callers can't build a
-// Source with both (or neither) field set by accident.
+// SMBSource / DAVSource / HTTPSource are the constructors, so callers can't
+// build a Source with two forms (or none) set by accident.
 func SMBSource(shareID, path string) Source { return Source{Share: shareID, SMBPath: path} }
+func DAVSource(id, path string) Source      { return Source{DAV: id, DAVPath: path} }
 func HTTPSource(url string) Source          { return Source{URL: url} }
 
 // key identifies the source for the session map and the work directory.
 func (s Source) key() string {
-	if s.URL != "" {
+	switch {
+	case s.URL != "":
 		return "url:" + s.URL
-	}
-	if s.Share != "" {
+	case s.DAV != "":
+		return "dav:" + s.DAV + ":" + s.DAVPath
+	case s.Share != "":
 		return "smb:" + s.Share + ":" + s.SMBPath
 	}
 	return "smb:" + s.SMBPath
@@ -99,10 +105,12 @@ func (s Source) key() string {
 
 // Label is the short human form used in logs and error messages.
 func (s Source) Label() string {
-	if s.URL != "" {
+	switch {
+	case s.URL != "":
 		return s.URL
-	}
-	if s.Share != "" {
+	case s.DAV != "":
+		return "[dav " + s.DAV + "] " + s.DAVPath
+	case s.Share != "":
 		return "[" + s.Share + "] " + s.SMBPath
 	}
 	return s.SMBPath
@@ -113,7 +121,7 @@ func (m *Manager) input(s Source) string {
 	if s.URL != "" {
 		return s.URL
 	}
-	return m.rawURL(s.Share, s.SMBPath)
+	return m.rawURL(s)
 }
 
 // surroundMode reads the live setting, normalised.

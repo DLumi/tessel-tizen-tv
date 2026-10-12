@@ -45,7 +45,7 @@ func countCalls(t *testing.T, calls string) int {
 func newTestManager(t *testing.T, ffprobe string, surround string) *Manager {
 	t.Helper()
 	m, err := NewManager(&Caps{FFprobe: ffprobe}, t.TempDir(),
-		func(_, p string) string { return "http://127.0.0.1:1/raw?path=" + p },
+		func(s Source) string { return "http://127.0.0.1:1/raw?path=" + s.SMBPath },
 		func() string { return surround })
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestProbeFollowsLiveSurroundSetting(t *testing.T) {
 	bin, _ := fakeFFprobe(t, "h264", "aac", 6)
 	mode := SurroundOff
 	m, err := NewManager(&Caps{FFprobe: bin}, t.TempDir(),
-		func(_, p string) string { return p }, func() string { return mode })
+		func(s Source) string { return s.SMBPath }, func() string { return mode })
 	if err != nil {
 		t.Fatal(err)
 	}
