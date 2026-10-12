@@ -25,6 +25,18 @@ test('a pinned share folder keeps its server and path, in the order pinned', fun
     assert.deepStrictEqual(st.json('vlctv_favorites_v1'), favs.list());
 });
 
+test('a WebDAV folder is kept by its server and path like a share folder (issue #145)', function () {
+    var favs = Favorites.create(storage());
+    var a = favs.add({ kind: 'webdav', srv: 'nc1', path: '/Films/Sci Fi', name: 'Sci Fi' });
+    assert.deepStrictEqual([a.kind, a.srv, a.path, a.name], ['webdav', 'nc1', '/Films/Sci Fi', 'Sci Fi']);
+    assert.strictEqual(favs.add({ kind: 'webdav', srv: 'nc1', path: '/Films/Sci Fi', name: 'Again' }).id, a.id);
+    // The same path on an SMB server is another folder.
+    assert.notStrictEqual(favs.add({ kind: 'smb', srv: 'nc1', path: '/Films/Sci Fi', name: 'Sci Fi' }).id, a.id);
+    assert.strictEqual(favs.find({ kind: 'webdav', srv: 'nc1', path: '/Films/Sci Fi' }).id, a.id);
+    assert.strictEqual(favs.find({ kind: 'webdav', srv: 'other', path: '/Films/Sci Fi' }), null);
+    assert.strictEqual(favs.list().length, 2);
+});
+
 test('a USB folder remembers the virtual root it is on, and a blank name falls back to the folder', function () {
     var favs = Favorites.create(storage());
     var f = favs.add({ kind: 'usb', path: '/opt/media/USBDriveA1/Shows/Bar', root: 'removable_abc', rootPath: '/opt/media/USBDriveA1' });

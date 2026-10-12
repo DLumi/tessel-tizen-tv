@@ -289,10 +289,11 @@
                        : (msg && msg.message ? msg.message : JSON.stringify(msg));
             if (typeof Debug !== 'undefined') Debug.error('player onerror: ' + text);
             if (retryThroughServer('player error: ' + text)) return;
-            // If the failing URL is an SMB proxy stream, drain the service's
-            // ring-buffer log to the PC listener so we can diagnose what the
-            // proxy was doing when AVPlay gave up.
-            if (typeof SMB !== 'undefined' && SMB.isStreamUrl && SMB.isStreamUrl(state.playingUri)) {
+            // If the failing URL is an SMB or WebDAV proxy stream, drain the
+            // service's ring-buffer log to the PC listener so we can diagnose
+            // what the proxy was doing when AVPlay gave up.
+            if (typeof SMB !== 'undefined' && SMB.isStreamUrl && (SMB.isStreamUrl(state.playingUri) ||
+                (typeof WebDAV !== 'undefined' && WebDAV.isStreamUrl(state.playingUri)))) {
                 try { SMB.dumpServiceLogs(); } catch (e) {}
             }
             showError(text);
@@ -396,6 +397,7 @@
             case 'browse-usb':         openBrowserAtRoot(); break;
             case 'browse-smb':         SMB.openBrowser(); break;
             case 'browse-dlna':        DLNA.openBrowser(); break;
+            case 'browse-webdav':      WebDAV.openBrowser(); break;
             case 'browse-recent':      openRecent(); break;
             case 'browse-favorites':   openFavorites(); break;
             case 'open-settings':      openSettings(); break;
@@ -847,6 +849,10 @@
             var srv = SMB.serverById(f.srv);
             return (srv && srv.host ? SMB.serverLabel(srv) : '\\\\?') + f.path.replace(/\//g, '\\');
         }
+        if (f.kind === 'webdav') {
+            var dav = WebDAV.serverById(f.srv);
+            return (dav ? WebDAV.serverLabel(dav) : '?') + f.path;
+        }
         return f.path;
     }
     function openFavorites() {
@@ -882,6 +888,14 @@
             if (!SMB.openFolder(f.srv, f.path)) {
                 state.view = 'browse';
                 UI.toast(I18n.t('favorites.serverGone'));
+            }
+            return;
+        }
+        if (f.kind === 'webdav') {
+            state.view = 'home';
+            if (!WebDAV.openFolder(f.srv, f.path)) {
+                state.view = 'browse';
+                UI.toast(I18n.t('dav.serverGone'));
             }
             return;
         }
@@ -1476,6 +1490,7 @@
         if (opts.file)   return opts.file;
         var s = String(uri || '');
         if (typeof SMB !== 'undefined' && SMB.isStreamUrl && SMB.isStreamUrl(s)) return s;
+        if (typeof WebDAV !== 'undefined' && WebDAV.isStreamUrl && WebDAV.isStreamUrl(s)) return s;
         if (/^file:/i.test(s)) return s;
         if (/^https?:/i.test(s) && FileTypes.kind(s.split('?')[0].split('#')[0]) === 'audio') return s;
         return null;
@@ -1739,6 +1754,7 @@
         if (!state.background) return;
         if (typeof SMB !== 'undefined' && SMB.detach) SMB.detach();   // its BACK would steer the player
         if (typeof DLNA !== 'undefined' && DLNA.detach) DLNA.detach();
+        if (typeof WebDAV !== 'undefined' && WebDAV.detach) WebDAV.detach();
         state.listBack = null;
         state.background = false;
         hideMiniPlayer();

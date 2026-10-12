@@ -65,6 +65,11 @@
             <div class="tile-label" data-i18n="home.dlna">Media Servers</div>
             <div class="tile-sub" data-i18n="home.dlnaSub">DLNA servers on your LAN</div>
         </button>
+        <button class="tile" data-action="browse-webdav">
+            <div class="tile-icon">DAV</div>
+            <div class="tile-label" data-i18n="home.webdav">WebDAV</div>
+            <div class="tile-sub" data-i18n="home.webdavSub">Nextcloud, NAS or cloud drive</div>
+        </button>
         <button class="tile" data-action="open-settings">
             <div class="tile-icon">⚙</div>
             <div class="tile-label" data-i18n="home.settings">Settings</div>
@@ -407,6 +412,21 @@
             <button id="smb-remove" class="settings-row"><span class="settings-label" data-i18n="smb.removeServer">Remove this server</span></button>
         </div>
 
+        <button class="settings-section-toggle" data-toggle="grp-dav" aria-expanded="false">
+            <span class="settings-section-title" data-i18n="dav.section">WebDAV server</span>
+            <span class="settings-section-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="settings-group is-collapsed" id="grp-dav">
+            <button class="settings-row" id="dav-server"><div class="settings-label" data-i18n="smb.server">Server to edit</div><div class="settings-value" id="dav-server-val"></div></button>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="dav.url">Address (URL)</span><input id="dav-url"  type="url"  placeholder="https://cloud.example.com/remote.php/dav/files/user/"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.user">Username</span><input id="dav-user" type="text"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.pass">Password</span><input id="dav-pass" type="password"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="dav.name">Name (optional)</span><input id="dav-name" type="text" placeholder="My Nextcloud"></label>
+            <button class="settings-row" id="dav-insecure"><div class="settings-label" data-i18n="dav.insecure">Accept a self-signed certificate</div><div class="settings-value" id="dav-insecure-val">Off</div></button>
+            <button id="dav-save" class="settings-row"><span class="settings-label" data-i18n="dav.save">Save WebDAV server</span></button>
+            <button id="dav-remove" class="settings-row"><span class="settings-label" data-i18n="smb.removeServer">Remove this server</span></button>
+        </div>
+
         <button class="settings-section-toggle" data-toggle="grp-srv" aria-expanded="false">
             <span class="settings-section-title" data-i18n="srv.section">Transcode server</span>
             <span class="settings-section-chev" aria-hidden="true">▸</span>
@@ -430,7 +450,7 @@
             <span class="settings-section-chev" aria-hidden="true">▸</span>
         </button>
         <div class="settings-group is-collapsed" id="grp-backup">
-            <button class="settings-row" id="backup-pass"><div class="settings-label" data-i18n="backup.passwords">Include SMB passwords (saved as plain text)</div><div class="settings-value" id="backup-pass-val">Off</div></button>
+            <button class="settings-row" id="backup-pass"><div class="settings-label" data-i18n="backup.passwords">Include SMB and WebDAV passwords (saved as plain text)</div><div class="settings-value" id="backup-pass-val">Off</div></button>
             <button class="settings-row" id="backup-history"><div class="settings-label" data-i18n="backup.history">Include history and resume positions</div><div class="settings-value" id="backup-history-val">On</div></button>
             <button id="backup-save" class="settings-row"><span class="settings-label" data-i18n="backup.save">Save backup to USB or an SMB share</span></button>
             <button id="backup-restore" class="settings-row"><span class="settings-label" data-i18n="backup.restore">Restore backup from USB or an SMB share</span></button>
@@ -499,6 +519,7 @@
 <script src="js/server.js"></script>
 <script src="js/smb.js"></script>
 <script src="js/dlna.js"></script>
+<script src="js/webdav.js"></script>
 <script src="js/keepawake.js"></script>
 <script src="js/viewer.js"></script>
 <script src="js/saved-streams.js"></script>

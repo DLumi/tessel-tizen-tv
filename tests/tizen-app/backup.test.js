@@ -9,6 +9,7 @@ var OTHER = { id: 'k3j9x2ab', host: '192.168.1.5', port: 445, share: 'Films', us
 var BOX   = { url: 'http://192.168.1.20:8200', token: 'tok', name: 'box', api: 3 };
 var SAVED = [{ id: 'q8w2e4r6', name: 'NASA Live', url: 'https://example.com/nasa.m3u8' }];
 var FAVS  = [{ id: 'f1a2b3c4', kind: 'smb', srv: 'k3j9x2ab', path: '/Shows/Foo', name: 'Foo' }];
+var DAV   = [{ id: 'nc1', name: 'Cloud', url: 'https://cloud.example.com/remote.php/dav/files/pat/', user: 'pat', pass: 'pw3', insecure: false }];
 
 function storage(init) {
     var s = {};
@@ -25,6 +26,7 @@ function fullTv() {
         vlctv_settings_v1:  { uiLanguage: 'ru-RU', autoPlay: true, urlDropCode: 'abc123defg' },
         vlctv_smb_v1:       NAS,
         vlctv_smb_extra_v1: [OTHER],
+        vlctv_webdav_v1:    DAV,
         vlctv_server_v1:    BOX,
         vlctv_saved_v1:     SAVED,
         vlctv_favorites_v1: FAVS,
@@ -46,6 +48,8 @@ test('a backup leaves SMB passwords out unless asked, and never carries the pair
     assert.strictEqual(b.data.smb.pass, undefined);
     assert.strictEqual(b.data.smbExtra[0].pass, undefined);
     assert.strictEqual(b.data.smbExtra[0].id, 'k3j9x2ab');
+    assert.strictEqual(b.data.webdav[0].pass, undefined);
+    assert.strictEqual(b.data.webdav[0].url, DAV[0].url);
     assert.strictEqual(b.data.settings.urlDropCode, undefined);
     assert.strictEqual(b.data.settings.uiLanguage, 'ru-RU');
     assert.deepStrictEqual(b.data.server, BOX);
@@ -58,6 +62,7 @@ test('a backup leaves SMB passwords out unless asked, and never carries the pair
     var withPass = Backup.build(fullTv(), { passwords: true, history: true });
     assert.strictEqual(withPass.data.smb.pass, 'pw');
     assert.strictEqual(withPass.data.smbExtra[0].pass, 'pw2');
+    assert.strictEqual(withPass.data.webdav[0].pass, 'pw3');
     assert.strictEqual(withPass.data.recent.length, 1);
     assert.deepStrictEqual(withPass.data.resume, { 'x': { pos: 1000, dur: 5000, ts: 1 } });
 });
@@ -68,6 +73,7 @@ test('a fresh install gets everything back from a backup with passwords', functi
     Backup.restore(fresh, b);
     assert.deepStrictEqual(fresh.json('vlctv_smb_v1'), NAS);
     assert.deepStrictEqual(fresh.json('vlctv_smb_extra_v1'), [OTHER]);
+    assert.deepStrictEqual(fresh.json('vlctv_webdav_v1'), DAV);
     assert.deepStrictEqual(fresh.json('vlctv_server_v1'), BOX);
     assert.deepStrictEqual(fresh.json('vlctv_saved_v1'), SAVED);
     assert.deepStrictEqual(fresh.json('vlctv_favorites_v1'), FAVS);
@@ -81,9 +87,12 @@ test('a fresh install gets everything back from a backup with passwords', functi
 test('a restore without passwords keeps the ones this TV already has for the same server', function () {
     var b = Backup.parse(JSON.stringify(Backup.build(fullTv(), {})));
     var tv = storage({ vlctv_smb_v1: { host: 'NAS', port: 445, share: 'media', user: 'tv', pass: 'kept' },
+                       vlctv_webdav_v1: [{ id: 'old', url: 'https://CLOUD.example.com/remote.php/dav/files/pat/', user: 'pat', pass: 'kept-dav' }],
                        vlctv_recent_v1: [{ uri: 'mine' }] });
     Backup.restore(tv, b);
     assert.strictEqual(tv.json('vlctv_smb_v1').pass, 'kept');
+    assert.strictEqual(tv.json('vlctv_webdav_v1')[0].pass, 'kept-dav');
+    assert.strictEqual(tv.json('vlctv_webdav_v1')[0].id, 'nc1');
     assert.strictEqual(tv.json('vlctv_smb_v1').host, 'nas');
     assert.strictEqual(tv.json('vlctv_smb_extra_v1')[0].pass, undefined);
     // History wasn't in the backup, so this TV's own stays.

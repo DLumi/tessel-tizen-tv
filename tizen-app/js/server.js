@@ -41,6 +41,9 @@ var TranscodeServer = (function () {
     /* The API version at which /play and /api/probe take host+share, so a
      * file on a server other than the first can be named to the box. */
     var MULTI_SHARE_API = 3;
+    /* The API version at which the box plays from a WebDAV server the TV
+     * registers through /api/dav (issue #145). */
+    var DAV_API = 4;
 
     /* Build the URL AVPlay should open for an SMB-relative path. The server
      * serves a live HLS manifest here (after transcoding/​remuxing as needed).
@@ -62,6 +65,44 @@ var TranscodeServer = (function () {
         var q = 'path=' + encodeURIComponent(path);
         if (srv) q += '&host=' + encodeURIComponent(srv.host) + '&share=' + encodeURIComponent(srv.share);
         return q;
+    }
+
+    /* ── WebDAV through the box (issue #145) ────────────────────────────────
+     *
+     * The box doesn't keep WebDAV servers: the TV registers the one it is
+     * about to play from (address and credentials, held in memory on the box
+     * for this run) and names the file by that server's id and path.  The
+     * registration is repeated before every play — it is one small POST, and
+     * it covers a box that restarted or a password changed on the TV.
+     * ------------------------------------------------------------------- */
+    function davQuery(path, server) {
+        return 'dav=' + encodeURIComponent(server.id) + '&path=' + encodeURIComponent(path);
+    }
+    /* The URL AVPlay opens for a file on a saved WebDAV server, or null when
+     * no box is paired or it is too old to know WebDAV. */
+    function davPlayUrl(path, server) {
+        var s = get();
+        if (!s || !s.url || !server || (s.api || 0) < DAV_API) return null;
+        var u = s.url.replace(/\/+$/, '') + '/play?' + davQuery(path, server);
+        if (s.token) u += '&token=' + encodeURIComponent(s.token);
+        return u;
+    }
+    /* The WebDAV file inside one of our /play?dav=… URLs: { id, path }, or
+     * null for anything else. */
+    function davRefOf(u) {
+        if (!isPlayUrl(u)) return null;
+        var id = queryParam(u, 'dav'), path = queryParam(u, 'path');
+        return id !== null && path !== null ? { id: id, path: path } : null;
+    }
+    function registerDav(server, cb) {
+        var u = withToken('/api/dav');
+        if (!u) return cb(new Error('not paired'));
+        xhrPost(u, { id: server.id, url: server.url, user: server.user || '', pass: server.pass || '',
+                     insecure: !!server.insecure }, function (err, res) {
+            if (err) return cb(err);
+            if (!res || !res.ok) return cb(new Error((res && res.error) || 'the server refused the WebDAV address'));
+            cb(null);
+        });
     }
 
     /* The cached API version goes stale when the box is updated, and an old
@@ -273,6 +314,8 @@ var TranscodeServer = (function () {
     /* The key smart routing remembers a file by, for the URI app.js plays: the
      * bare path on the first server, as it always was. */
     function smartKeyOf(uri) {
+        var dav = davRefOf(uri);
+        if (dav !== null) return 'dav:' + dav.id + ':' + dav.path;
         var ref = shareRefOf(uri);
         if (ref !== null) return ref.host ? '//' + ref.host + '/' + ref.share + ':' + ref.path : ref.path;
         return isLocalFileUri(uri) ? uri : null;
@@ -365,11 +408,49 @@ var TranscodeServer = (function () {
         }, cb);
     }
 
+    /* A WebDAV file through the box: the box has to know the server first.
+     * When it can't be told — the box is unreachable, or refuses the
+     * address — the file plays straight off the TV's own service instead,
+     * which is what an unpaired TV does.  With smart routing on, a file the
+     * box would only remux plays off the service too, as a share file does. */
+    function resolveDav(uri, dav, cb) {
+        var key = smartKeyOf(uri);
+        var server = typeof WebDAV !== 'undefined' && WebDAV.serverById ? WebDAV.serverById(dav.id) : null;
+        if (!server) {
+            log('webdav: ' + key + ' → server (that WebDAV server is no longer saved on the TV)');
+            return cb(uri, null);
+        }
+        function direct(why) {
+            log('webdav: ' + key + ' → direct (' + why + ')');
+            WebDAV.ensureConnected(dav.id, function (e) {
+                if (e) { log('webdav: local stream not ready either: ' + e.message); return cb(uri, null); }
+                cb(WebDAV.streamUrl(dav.path, dav.id), null);
+            });
+        }
+        registerDav(server, function (err) {
+            if (err) return direct('the box could not be told about the server: ' + err.message);
+            if (!smartEnabled()) return cb(uri, null);
+            resolveSmart({
+                key: key,
+                query: davQuery(dav.path, server),
+                serverUrl: uri,
+                directUrl: WebDAV.streamUrl(dav.path, dav.id),
+                ready: function (done) {
+                    WebDAV.ensureConnected(dav.id, function (e) {
+                        done(e ? new Error('local WebDAV not ready: ' + e.message) : null);
+                    });
+                }
+            }, cb);
+        });
+    }
+
     /* The one entry point app.js needs: given the URI we would have played,
      * call back with the URI we should actually open.  Falls back to the
      * original on every failure path, so this can only change which bytes
      * AVPlay reads — never whether it gets any. */
     function resolvePlaybackUri(uri, cb) {
+        var dav = davRefOf(uri);
+        if (dav !== null) return resolveDav(uri, dav, cb);
         var ref = smartEnabled() ? shareRefOf(uri) : null;
         if (ref !== null) return resolveShare(uri, ref, cb);
         // A direct share stream, opened from Recents say, needs the service to
@@ -379,6 +460,15 @@ var TranscodeServer = (function () {
         if (streamSrv !== null && SMB.ensureConnected) {
             return SMB.ensureConnected(streamSrv, function (e) {
                 if (e) log('SMB connect before play failed: ' + e.message);
+                cb(uri);
+            });
+        }
+        // The same for a WebDAV stream (issue #145): the service has to know
+        // the server before AVPlay asks it for the file.
+        var davSrv = typeof WebDAV !== 'undefined' && WebDAV.streamServerOf ? WebDAV.streamServerOf(uri) : null;
+        if (davSrv !== null && WebDAV.ensureConnected) {
+            return WebDAV.ensureConnected(davSrv, function (e) {
+                if (e) log('WebDAV connect before play failed: ' + e.message);
                 cb(uri);
             });
         }
@@ -913,6 +1003,7 @@ var TranscodeServer = (function () {
     return {
         get: get, set: set, clear: clear, isPaired: isPaired,
         playUrl: playUrl, isPlayUrl: isPlayUrl, pair: pair,
+        davPlayUrl: davPlayUrl,   // webdav.js: the box's URL for a WebDAV file (#145)
         resolvePlaybackUri: resolvePlaybackUri, markDirectFailed: markDirectFailed,
         findServers: findServers, connectTo: connectTo,
         adoptShare: adoptShare, pushShare: pushShare,
