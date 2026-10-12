@@ -382,6 +382,15 @@ var TranscodeServer = (function () {
                 cb(uri);
             });
         }
+        // The same for a WebDAV stream (issue #145): the service has to know
+        // the server before AVPlay asks it for the file.
+        var davSrv = typeof WebDAV !== 'undefined' && WebDAV.streamServerOf ? WebDAV.streamServerOf(uri) : null;
+        if (davSrv !== null && WebDAV.ensureConnected) {
+            return WebDAV.ensureConnected(davSrv, function (e) {
+                if (e) log('WebDAV connect before play failed: ' + e.message);
+                cb(uri);
+            });
+        }
         if (!isLocalFileUri(uri) || !relayEnabled() || !isPaired()) return cb(uri);
         armRelay(function (r) {
             if (!r) return cb(uri);

@@ -4,15 +4,16 @@
  * a pinned folder opens that folder from the home screen in one step.  Each
  * entry is
  *   { id, kind: 'smb', name, srv, path }          a folder on a share
+ *   { id, kind: 'webdav', name, srv, path }       a folder on a WebDAV server (#145)
  *   { id, kind: 'usb', name, path, root, rootPath } a folder on local storage
  * and lives in localStorage under vlctv_favorites_v1, which Settings → Backup
  * carries along with the settings.
  *
- * `srv` is the saved SMB server's id ('' for the first one), `path` the
- * folder below the share root ('/Shows/Foo').  On USB `path` is the folder's
- * full path, `root` the Tizen virtual root it is on (removable_…) and
- * `rootPath` that root's full path, so the folder can be opened again through
- * the virtual-root form that every firmware resolves.
+ * `srv` is the saved SMB server's id ('' for the first one) or the WebDAV
+ * server's, `path` the folder below the root ('/Shows/Foo').  On USB `path`
+ * is the folder's full path, `root` the Tizen virtual root it is on
+ * (removable_…) and `rootPath` that root's full path, so the folder can be
+ * opened again through the virtual-root form that every firmware resolves.
  *
  * ES5 on purpose, like the rest of the app. */
 
@@ -21,11 +22,13 @@ var Favorites = (function () {
 
     var KEY = 'vlctv_favorites_v1';
 
-    /* The same folder: on a share, the same server and path; on USB, the
+    /* The same folder: on a server, the same server and path; on USB, the
      * same full path. */
+    function onServer(kind) { return kind === 'smb' || kind === 'webdav'; }
+    function isKind(kind) { return onServer(kind) || kind === 'usb'; }
     function same(a, b) {
         if (!a || !b || a.kind !== b.kind) return false;
-        if (a.kind === 'smb') return String(a.srv || '') === String(b.srv || '') && a.path === b.path;
+        if (onServer(a.kind)) return String(a.srv || '') === String(b.srv || '') && a.path === b.path;
         return a.path === b.path;
     }
 
@@ -37,7 +40,7 @@ var Favorites = (function () {
             try { v = raw ? JSON.parse(raw) : []; } catch (e) {}
             if (!Array.isArray(v)) return [];
             return v.filter(function (f) {
-                return f && (f.kind === 'smb' || f.kind === 'usb') && typeof f.path === 'string';
+                return f && isKind(f.kind) && typeof f.path === 'string';
             });
         }
         function write(items) {
@@ -67,14 +70,14 @@ var Favorites = (function () {
         /* Pinning a folder that is already pinned doesn't add it twice: the
          * entry it already has is returned untouched. */
         function add(folder) {
-            if (!folder || (folder.kind !== 'smb' && folder.kind !== 'usb')) return null;
+            if (!folder || !isKind(folder.kind)) return null;
             if (typeof folder.path !== 'string' || !folder.path) return null;
             var items = list();
             var dup = find(folder);
             if (dup) return dup;
             var item = { id: newId(items), kind: folder.kind, path: folder.path,
                          name: String(folder.name || '').trim() || folder.path.split('/').pop() || folder.path };
-            if (folder.kind === 'smb') item.srv = String(folder.srv || '');
+            if (onServer(folder.kind)) item.srv = String(folder.srv || '');
             else {
                 if (folder.root)     item.root     = String(folder.root);
                 if (folder.rootPath) item.rootPath = String(folder.rootPath);

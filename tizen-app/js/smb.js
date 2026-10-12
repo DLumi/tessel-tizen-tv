@@ -358,8 +358,10 @@ var SMB = (function () {
      * whose stem continues the video's with a dot (Movie.en.srt, Movie.nl.srt).
      * Returns { "Movie.mp4": [ { name, lang, ext, uri } ] }.  The uri always
      * goes through the smbproxy — a paired transcode server changes where the
-     * video bytes come from, not where the .srt lives. */
-    function siblingSubtitles(entries, dir, srv) {
+     * video bytes come from, not where the .srt lives.  The WebDAV browser
+     * lists the same way and passes its own urlOf (issue #145). */
+    function siblingSubtitles(entries, dir, srv, urlOf) {
+        urlOf = urlOf || streamUrl;
         var subsByStem = {};
         entries.forEach(function (e) {
             if (e.isDir || !isSubtitle(e.name)) return;
@@ -368,7 +370,7 @@ var SMB = (function () {
                 name: e.name,
                 lang: langTag(e.name),
                 ext:  ext(e.name),
-                uri:  streamUrl(join(dir, e.name), srv)
+                uri:  urlOf(join(dir, e.name), srv)
             });
         });
         var stems = Object.keys(subsByStem);

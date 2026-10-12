@@ -20,6 +20,9 @@
  *   GET  /dlna/discover, POST /dlna/browse
  *                       → DLNA media servers on the LAN and their folders
  *                         (see the DLNA block near the bottom)
+ *   POST /dav/connect, GET /dav/list, GET /dav/stream
+ *                       → a WebDAV server's folders and files, Basic or
+ *                         Digest auth (see the WebDAV block near the bottom)
  *
  * It also hosts the optional *local relay* (see the block near the bottom):
  * a second listener, on the LAN rather than loopback, that serves files off
@@ -2094,11 +2097,305 @@ function startDlnaPassive(ifaces) {
     } catch (e) { log('DLNA_PASSIVE_BIND_ERR', e && e.message); }
 }
 
+/* ============================================================================
+ * WebDAV servers (issue #145)
+ * ----------------------------------------------------------------------------
+ * A Nextcloud, a NAS's WebDAV server or a cloud drive is just HTTP: PROPFIND
+ * lists a folder, GET with a Range header reads a file.  The page could send
+ * those itself, but it can't accept a home server's self-signed certificate,
+ * can't hand AVPlay the credentials, and would leave the trail out of the
+ * ring-buffer log.  So the service does it, the way it does SMB:
+ *
+ *   POST /dav/connect { id, url, user, pass, insecure }
+ *                       → PROPFIND Depth 0 on the root, which proves the
+ *                         address, the credentials and the certificate;
+ *                         remembers the server under `id`
+ *   GET  /dav/list?srv=<id>&path=/Films   → { ok, entries:[{ name, isDir, size }] }
+ *   GET  /dav/stream?srv=<id>&path=/Films/a.mkv
+ *                       → the file, Range and all, for AVPlay
+ *
+ * Auth is whatever the server asks for in its 401: Basic, or Digest (Apache's
+ * mod_dav and some NAS boxes).  Nothing is sent until the server has asked,
+ * and what it asked for is remembered per server so a stream's many Range
+ * requests don't each cost a round trip.  `insecure` accepts a certificate
+ * the TV can't verify — the self-signed one on a NAS at home.
+ * ==========================================================================*/
+
+var https = require('https');
+
+var DAV_HTTP_MS      = 20000;              // PROPFIND, and a stream's headers
+var DAV_MAX_BYTES    = 8 * 1024 * 1024;    // one PROPFIND reply
+var DAV_MAX_REDIRECT = 3;
+var DAV_PROPFIND_BODY =
+    '<?xml version="1.0" encoding="utf-8"?>' +
+    '<d:propfind xmlns:d="DAV:"><d:prop>' +
+    '<d:resourcetype/><d:getcontentlength/><d:displayname/>' +
+    '</d:prop></d:propfind>';
+
+var davById = {};     // id -> { id, url, user, pass, insecure }
+var davAuth = {};     // id -> { scheme: 'basic' } | { scheme: 'digest', ch, nc }
+
+/* The server's root with one trailing slash; '' when it isn't http(s). */
+function davRoot(url) {
+    var u = String(url || '').trim();
+    if (!/^https?:\/\/[^\/\s]+/i.test(u)) return '';
+    return u.replace(/\/*$/, '/');
+}
+/* Where `path` below the root is: each segment percent-encoded, a
+ * collection with its trailing slash so no server has to redirect us to it. */
+function davUrl(server, path, isDir) {
+    var segs = String(path || '').split('/'), enc = [];
+    for (var i = 0; i < segs.length; i++) if (segs[i]) enc.push(encodeURIComponent(segs[i]));
+    return davRoot(server.url) + enc.join('/') + (isDir && enc.length ? '/' : '');
+}
+
+function md5hex(s) { return crypto.createHash('md5').update(s, 'utf8').digest('hex'); }
+
+/* The schemes a 401 offers: { basic, digest: { realm, nonce, qop, opaque,
+ * algorithm, stale } }.  Node folds repeated headers into one string. */
+function parseAuthChallenge(h) {
+    var out = { basic: false, digest: null }, text = String(h || '');
+    if (/(^|[\s,])basic(\s|$)/i.test(text)) out.basic = true;
+    var m = /(^|[\s,])digest\s+([\s\S]*)/i.exec(text);
+    if (m) {
+        var d = {}, re = /([a-z0-9_-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s,]+))/gi, p;
+        while ((p = re.exec(m[2]))) d[p[1].toLowerCase()] = p[2] !== undefined ? p[2].replace(/\\(.)/g, '$1') : p[3];
+        if (d.realm !== undefined && d.nonce) out.digest = d;
+    }
+    return out;
+}
+/* The Authorization value for one Digest request (RFC 7616, MD5 only —
+ * what mod_dav and the NAS boxes do).  qop=auth when offered. */
+function digestAuthorization(ch, method, uri, user, pass, nc, cnonce) {
+    var alg = String(ch.algorithm || 'MD5').toUpperCase();
+    var ha1 = md5hex(user + ':' + ch.realm + ':' + pass);
+    if (alg === 'MD5-SESS') ha1 = md5hex(ha1 + ':' + ch.nonce + ':' + cnonce);
+    var ha2 = md5hex(method + ':' + uri);
+    var qop = /(^|,)\s*auth\s*(,|$)/i.test(ch.qop || '') ? 'auth' : '';
+    var ncHex = ('00000000' + nc.toString(16)).slice(-8);
+    var resp = qop ? md5hex(ha1 + ':' + ch.nonce + ':' + ncHex + ':' + cnonce + ':' + qop + ':' + ha2)
+                   : md5hex(ha1 + ':' + ch.nonce + ':' + ha2);
+    var out = 'Digest username="' + user.replace(/"/g, '\\"') + '", realm="' + ch.realm + '", nonce="' + ch.nonce +
+              '", uri="' + uri + '", response="' + resp + '", algorithm=' + alg;
+    if (qop) out += ', qop=' + qop + ', nc=' + ncHex + ', cnonce="' + cnonce + '"';
+    if (ch.opaque) out += ', opaque="' + ch.opaque + '"';
+    return out;
+}
+function davAuthorization(server, method, uri) {
+    var a = davAuth[server.id];
+    if (!a || !server.user) return '';
+    if (a.scheme === 'basic') return 'Basic ' + Buffer.from(server.user + ':' + (server.pass || ''), 'utf8').toString('base64');
+    a.nc = (a.nc || 0) + 1;
+    return digestAuthorization(a.ch, method, uri, server.user, server.pass || '', a.nc, crypto.randomBytes(8).toString('hex'));
+}
+
+/* What went wrong, for the app: { code, error }.  code picks the text the
+ * app shows; error is the detail for the log. */
+function davError(code, text) { var e = new Error(text); e.code = code; return e; }
+function davSocketError(e) {
+    var c = (e && e.code) || '';
+    if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ERR_TLS/i.test(c) || /certificate/i.test(e && e.message || ''))
+        return davError('cert', c || e.message);
+    if (c === 'ENOTFOUND' || c === 'EAI_AGAIN') return davError('host', 'host not found');
+    if (c === 'ECONNREFUSED') return davError('refused', 'connection refused');
+    if (c === 'ETIMEDOUT' || c === 'EHOSTUNREACH') return davError('unreachable', c);
+    return davError('other', (e && e.message) || String(e));
+}
+
+/* One request to the server: cb(err, res, text).  With opts.stream the
+ * response is handed over unread (for piping), else its body comes as text.
+ * A 401 is answered once with what the server asked for; a redirect is
+ * followed, carrying credentials only to the same host. */
+function davRequest(server, method, target, headers, opts, cb) {
+    opts = opts || {};
+    var done = false, retried = false, hops = 0;
+    function finish(err, res, text) { if (done) return; done = true; cb(err, res, text); }
+    function attempt(url) {
+        var u = require('url').parse(url);
+        if (!u.hostname) return finish(davError('other', 'bad url'));
+        var secure = u.protocol === 'https:';
+        var h = {};
+        for (var k in headers) if (headers[k] !== undefined) h[k] = headers[k];
+        h['User-Agent'] = 'Tessel';
+        var sameHost = require('url').parse(davRoot(server.url)).host === u.host;
+        var auth = sameHost ? davAuthorization(server, method, u.path) : '';
+        if (auth) h['Authorization'] = auth;
+        var req;
+        try {
+            req = (secure ? https : http).request({
+                host: u.hostname, port: u.port || (secure ? 443 : 80), path: u.path, method: method,
+                headers: h, agent: false, rejectUnauthorized: !server.insecure
+            }, function (res) {
+                var status = res.statusCode;
+                if (status === 401 && !retried && server.user && sameHost) {
+                    retried = true;
+                    var ch = parseAuthChallenge(res.headers['www-authenticate']);
+                    res.resume();
+                    if (ch.digest) { davAuth[server.id] = { scheme: 'digest', ch: ch.digest, nc: 0 }; return attempt(url); }
+                    if (ch.basic && !(davAuth[server.id] && davAuth[server.id].scheme === 'basic')) {
+                        davAuth[server.id] = { scheme: 'basic' };
+                        return attempt(url);
+                    }
+                    return finish(davError('auth', 'HTTP 401'), res);
+                }
+                if ((status === 301 || status === 302 || status === 307 || status === 308) && res.headers.location && hops < DAV_MAX_REDIRECT) {
+                    hops++;
+                    res.resume();
+                    return attempt(require('url').resolve(url, res.headers.location));
+                }
+                if (opts.stream) return finish(null, res);
+                var chunks = [], size = 0;
+                res.on('data', function (c) {
+                    size += c.length;
+                    if (size > DAV_MAX_BYTES) { try { req.abort(); } catch (e) {} return finish(davError('other', 'reply too large')); }
+                    chunks.push(c);
+                });
+                res.on('end', function () { finish(null, res, Buffer.concat(chunks).toString('utf8')); });
+            });
+            req.setTimeout(DAV_HTTP_MS, function () { try { req.abort(); } catch (e) {} finish(davError('timeout', 'timeout')); });
+            req.on('error', function (e) { finish(davSocketError(e)); });
+            if (opts.onRequest) opts.onRequest(req);
+            req.end(opts.body || undefined);
+        } catch (e) { finish(davSocketError(e)); }
+    }
+    attempt(target);
+}
+
+/* What a status other than 207 means for a PROPFIND. */
+function davStatusError(status) {
+    if (status === 401 || status === 403) return davError('auth', 'HTTP ' + status);
+    if (status === 404 || status === 410) return davError('notfound', 'HTTP ' + status);
+    if (status === 405 || status === 501 || (status >= 200 && status < 300)) return davError('notdav', 'HTTP ' + status);
+    return davError('other', 'HTTP ' + status);
+}
+
+/* A path's decoded, trailing-slash-free form, for comparing hrefs. */
+function davPlainPath(p) {
+    var s = String(p || '');
+    try { s = decodeURIComponent(s); } catch (e) {}
+    return s.replace(/\/+$/, '');
+}
+/* A multistatus reply for the collection at `url` → its entries, itself
+ * left out: [{ name, isDir, size }], folders first. */
+function parseMultistatus(xml, url) {
+    var self = davPlainPath(require('url').parse(url).pathname);
+    var out = [];
+    xmlElements(xml, 'response').forEach(function (r) {
+        var href = xmlText(r.body, 'href');
+        if (!href) return;
+        var p = /^[a-z][a-z0-9+.-]*:\/\//i.test(href) ? require('url').parse(href).pathname : href;
+        var plain = davPlainPath(p);
+        if (plain === self) return;
+        var name = plain.split('/').pop() || xmlText(r.body, 'displayname');
+        if (!name) return;
+        var isDir = /<(?:[\w.-]+:)?collection\b/i.test(xmlText(r.body, 'resourcetype'));
+        var size = parseInt(xmlText(r.body, 'getcontentlength'), 10);
+        out.push({ name: name, isDir: isDir, size: isDir || !(size > 0) ? 0 : size });
+    });
+    out.sort(function (a, b) {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+    });
+    return out;
+}
+
+/* PROPFIND on the collection at `path`: cb(err, entries). */
+function davPropfind(server, path, depth, cb) {
+    var url = davUrl(server, path, true);
+    davRequest(server, 'PROPFIND', url, {
+        'Depth': String(depth), 'Content-Type': 'application/xml; charset=utf-8',
+        'Content-Length': String(Buffer.byteLength(DAV_PROPFIND_BODY))
+    }, { body: DAV_PROPFIND_BODY }, function (err, res, text) {
+        if (err) return cb(err);
+        if (res.statusCode !== 207) return cb(davStatusError(res.statusCode));
+        if (!/<(?:[\w.-]+:)?multistatus\b/i.test(text)) return cb(davError('notdav', 'no multistatus'));
+        cb(null, parseMultistatus(text, url));
+    });
+}
+
+function davServerOf(query) { return davById[(query && query.srv) || ''] || null; }
+
+function handleDavConnect(req, res) {
+    var raw = '';
+    req.on('data', function (c) { raw += c; });
+    req.on('end', function () {
+        var b;
+        try { b = JSON.parse(raw || '{}'); } catch (e) { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+        var server = { id: String(b.id || ''), url: davRoot(b.url), user: String(b.user || ''),
+                       pass: String(b.pass || ''), insecure: !!b.insecure };
+        log('DAV_CONNECT_REQ', { id: server.id, url: server.url, user: server.user || '(none)',
+                                 pass: server.pass ? server.pass.length + ' chars' : 'none', insecure: server.insecure });
+        if (!server.url) return sendJson(res, 400, { ok: false, code: 'other', error: 'http(s) URL required' });
+        delete davAuth[server.id];   // the credentials may have changed
+        davPropfind(server, '', 0, function (err) {
+            if (err) {
+                log('DAV_CONNECT_FAIL', { code: err.code, error: err.message });
+                return sendJson(res, 502, { ok: false, code: err.code, error: err.message });
+            }
+            davById[server.id] = server;
+            log('DAV_CONNECT_OK', { id: server.id, auth: (davAuth[server.id] || {}).scheme || 'none' });
+            sendJson(res, 200, { ok: true, auth: (davAuth[server.id] || {}).scheme || 'none' });
+        });
+    });
+}
+
+function handleDavList(req, res, query) {
+    var server = davServerOf(query);
+    if (!server) return sendJson(res, 409, { ok: false, code: 'other', error: 'not connected' });
+    var path = query.path || '';
+    davPropfind(server, path, 1, function (err, entries) {
+        if (err) {
+            log('DAV_LIST_FAIL', { path: path, code: err.code, error: err.message });
+            return sendJson(res, 502, { ok: false, code: err.code, error: err.message });
+        }
+        log('DAV_LIST_OK', { path: path, entries: entries.length });
+        sendJson(res, 200, { ok: true, path: path, entries: entries });
+    });
+}
+
+/* The file at `path`, as the server sends it: its status, its Range
+ * handling, its length. */
+function handleDavStream(req, res, query) {
+    var server = davServerOf(query);
+    if (!server) { cors(res, 409, 'text/plain'); return res.end('not connected'); }
+    var path = query.path || '';
+    var headers = {};
+    if (req.headers.range) headers['Range'] = req.headers.range;
+    var upstream = null, aborted = false;
+    req.on('close', function () { aborted = true; if (upstream) try { upstream.abort(); } catch (e) {} });
+    davRequest(server, req.method === 'HEAD' ? 'HEAD' : 'GET', davUrl(server, path, false), headers,
+               { stream: true, onRequest: function (r) { upstream = r; } }, function (err, up) {
+        if (err) {
+            log('DAV_STREAM_FAIL', { path: path, code: err.code, error: err.message });
+            if (aborted) return;
+            cors(res, 502, 'text/plain'); return res.end(err.message);
+        }
+        var status = up.statusCode;
+        if (status !== 200 && status !== 206 && status !== 416) {
+            log('DAV_STREAM_FAIL', { path: path, status: status });
+            up.resume();
+            cors(res, status === 401 || status === 403 ? 403 : status === 404 ? 404 : 502, 'text/plain');
+            return res.end('HTTP ' + status);
+        }
+        var h = { 'Accept-Ranges': 'bytes' };
+        // Our type for an extension we know (a .srt reads as text, as off a
+        // share); the server's for the rest.
+        var ct = contentType(path);
+        if (ct === 'application/octet-stream') ct = up.headers['content-type'] || ct;
+        if (up.headers['content-length'] !== undefined) h['Content-Length'] = up.headers['content-length'];
+        if (up.headers['content-range']) h['Content-Range'] = up.headers['content-range'];
+        cors(res, status, ct, h);
+        if (req.method === 'HEAD') { up.resume(); return res.end(); }
+        up.on('error', function () { try { res.end(); } catch (e) {} });
+        up.pipe(res);
+    });
+}
+
 var server = http.createServer(function (req, res) {
     var u = require('url').parse(req.url, true);
     if (req.method === 'OPTIONS') { cors(res, 204, 'text/plain'); return res.end(); }
 
-    if (u.pathname === '/smb/ping')        return sendJson(res, 200, { ok: true, connected: !!credsById[''], servers: Object.keys(credsById) });
+    if (u.pathname === '/smb/ping')        return sendJson(res, 200, { ok: true, connected: !!credsById[''], servers: Object.keys(credsById), dav: Object.keys(davById) });
     if (u.pathname === '/smb/debug/logs')  return sendJson(res, 200, { logs: LOGS });
     if (u.pathname === '/smb/connect' && req.method === 'POST') return handleConnect(req, res);
     if (u.pathname === '/smb/shares' && req.method === 'POST')  return handleShares(req, res);
@@ -2119,6 +2416,11 @@ var server = http.createServer(function (req, res) {
     // DLNA media servers (issue #131).
     if (u.pathname === '/dlna/discover') return handleDlnaDiscover(req, res);
     if (u.pathname === '/dlna/browse' && req.method === 'POST') return handleDlnaBrowse(req, res);
+
+    // WebDAV servers (issue #145).
+    if (u.pathname === '/dav/connect' && req.method === 'POST') return handleDavConnect(req, res);
+    if (u.pathname === '/dav/list')    return handleDavList(req, res, u.query);
+    if (u.pathname === '/dav/stream')  return handleDavStream(req, res, u.query);
 
     cors(res, 404, 'text/plain'); res.end('Not Found');
 });

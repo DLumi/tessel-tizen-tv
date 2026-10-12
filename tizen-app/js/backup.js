@@ -50,6 +50,7 @@ var Backup = (function () {
         settings: 'vlctv_settings_v1',
         smb:      'vlctv_smb_v1',
         smbExtra: 'vlctv_smb_extra_v1',
+        webdav:   'vlctv_webdav_v1',
         server:   'vlctv_server_v1',
         saved:    'vlctv_saved_v1',
         favorites: 'vlctv_favorites_v1',
@@ -100,6 +101,9 @@ var Backup = (function () {
         var extra = readJson(storage, KEYS.smbExtra);
         if (Array.isArray(extra))
             data.smbExtra = opts.passwords ? extra : extra.map(withoutPass);
+        var dav = readJson(storage, KEYS.webdav);
+        if (Array.isArray(dav))
+            data.webdav = opts.passwords ? dav : dav.map(withoutPass);
 
         var server = readJson(storage, KEYS.server);
         if (server && server.url) data.server = server;
@@ -142,11 +146,13 @@ var Backup = (function () {
 
     function lower(s) { return String(s || '').toLowerCase(); }
     function sameServer(a, b) {
+        if (a.url || b.url) return lower(a.url) === lower(b.url) && lower(a.user) === lower(b.user);
         return lower(a.host) === lower(b.host) && lower(a.share) === lower(b.share) &&
                lower(a.user) === lower(b.user);
     }
     /* A server restored without its password takes the one this TV already
-     * keeps for the same host, share and user. */
+     * keeps for the same host, share and user (SMB), or address and user
+     * (WebDAV). */
     function keepPass(server, current) {
         if (!server || typeof server !== 'object' || server.pass) return server;
         for (var i = 0; i < current.length; i++)
@@ -181,6 +187,9 @@ var Backup = (function () {
         if (d.smb && typeof d.smb === 'object') writeJson(storage, KEYS.smb, keepPass(d.smb, known));
         if (Array.isArray(d.smbExtra))
             writeJson(storage, KEYS.smbExtra, d.smbExtra.map(function (s) { return keepPass(s, known); }));
+        var curDav = readJson(storage, KEYS.webdav);
+        if (Array.isArray(d.webdav))
+            writeJson(storage, KEYS.webdav, d.webdav.map(function (s) { return keepPass(s, Array.isArray(curDav) ? curDav : []); }));
 
         if (d.server && d.server.url) writeJson(storage, KEYS.server, d.server);
         if (Array.isArray(d.saved)) writeJson(storage, KEYS.saved, d.saved);
