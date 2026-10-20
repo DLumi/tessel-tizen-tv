@@ -33,6 +33,10 @@ var Settings = (function () {
         // open in the viewers, anything else is shown but can't be opened),
         // or 'media' — folders, video, audio and playlists, as before 1.11.
         browseFilter:     'all',       // 'all' | 'media'
+        // List files and folders whose name starts with a dot (issue #147).
+        // Off by default: on a stick or share written from a Mac those are
+        // "._movie.mp4" companions and .DS_Store, which only get in the way.
+        showHidden:       false,
         // Route USB / internal-storage files through the paired transcode
         // server instead of straight into AVPlay.  Off by default: it only
         // helps when a transcode server is paired, and it costs the embedded

@@ -36,9 +36,10 @@ var FileTypes = (function () {
     /* A dot-prefixed entry no listing should show.  macOS writes an
      * AppleDouble companion ("._movie.mp4", a few KB of Finder metadata)
      * next to every file it copies to a FAT/exFAT stick or an SMB share,
-     * plus .DS_Store, .Spotlight-V100, .Trashes and .fseventsd; Linux and
-     * Windows tools hide dot entries too.  Going by the extension alone,
-     * "._movie.mp4" looks like a video and fails to play. */
+     * plus .DS_Store, .Spotlight-V100, .Trashes and .fseventsd; Mac and Linux
+     * file managers hide dot entries too.  Going by the extension alone,
+     * "._movie.mp4" looks like a video and fails to play.  Settings → Show
+     * hidden files (showHidden) lists them anyway. */
     function isHidden(name) {
         var s = String(name || '');
         var slash = s.lastIndexOf('/');

@@ -121,7 +121,6 @@ var Browser = (function () {
         try {
             file.listFiles(
                 function (entries) {
-                    entries = entries.filter(function (f) { return !FileTypes.isHidden(f.name); });
                     if (typeof Debug !== 'undefined') Debug.browse('  ' + entries.length + ' entries');
 
                     // Build a map of basename → list of sibling subtitle files
