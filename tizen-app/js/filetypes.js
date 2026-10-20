@@ -33,6 +33,20 @@ var FileTypes = (function () {
     /* 'video' | 'audio' | 'image' | 'text' | 'playlist' | 'other' */
     function kind(name) { return byExt[ext(name)] || 'other'; }
 
+    /* A dot-prefixed entry no listing should show.  macOS writes an
+     * AppleDouble companion ("._movie.mp4", a few KB of Finder metadata)
+     * next to every file it copies to a FAT/exFAT stick or an SMB share,
+     * plus .DS_Store, .Spotlight-V100, .Trashes and .fseventsd; Mac and Linux
+     * file managers hide dot entries too.  Going by the extension alone,
+     * "._movie.mp4" looks like a video and fails to play.  Settings → Show
+     * hidden files (showHidden) lists them anyway. */
+    function isHidden(name) {
+        var s = String(name || '');
+        var slash = s.lastIndexOf('/');
+        if (slash >= 0) s = s.slice(slash + 1);
+        return s.charAt(0) === '.';
+    }
+
     /* Goes to the player, and so into the folder's next / prev list. */
     function isPlayable(name) {
         var k = kind(name);
@@ -68,7 +82,7 @@ var FileTypes = (function () {
     var ICONS = { dir: '📁', video: '🎬', audio: '🎵', image: '📷', text: '📄', playlist: '📋', other: '▫' };
     function icon(k) { return ICONS[k] || ICONS.other; }
 
-    return { ext: ext, kind: kind, isPlayable: isPlayable, shown: shown, folderArt: folderArt, icon: icon };
+    return { ext: ext, kind: kind, isHidden: isHidden, isPlayable: isPlayable, shown: shown, folderArt: folderArt, icon: icon };
 })();
 
 // Ignored by the Tizen/browser build; lets Node tests drive the module.

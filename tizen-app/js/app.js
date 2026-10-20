@@ -441,6 +441,7 @@
             case 'setting-shuffle':       openShufflePicker(); break;
             case 'setting-aspect-mode':   openAspectPicker(); break;
             case 'setting-browse-filter': openBrowseFilterPicker(); break;
+            case 'setting-show-hidden':   openShowHiddenPicker(); break;
             case 'setting-slideshow-interval': openSlideshowPicker(); break;
             case 'setting-subtitle-size':     openSubtitlePicker('subtitleSize',     I18n.t('settings.subSize'),     SubtitleStyle.forSize());     break;
             case 'setting-subtitle-font':     openSubtitlePicker('subtitleFont',     I18n.t('settings.subFont'),     SubtitleStyle.forFont());     break;
@@ -741,8 +742,10 @@
             var artName = FileTypes.folderArt(entries.map(function (e) { return e.isDir ? '' : e.name; }));
             var art = null;
             entries.forEach(function (e) { if (!e.isDir && e.name === artName) art = e.uri; });
-            var filter = Settings.get('browseFilter');
-            entries = entries.filter(function (e) { return FileTypes.shown(filter, e.kind); });
+            var filter = Settings.get('browseFilter'), showHidden = Settings.get('showHidden');
+            entries = entries.filter(function (e) {
+                return (showHidden || !FileTypes.isHidden(e.name)) && FileTypes.shown(filter, e.kind);
+            });
             // Ordered list of playable media in this folder — the playlist
             // that auto-play and next/prev walk through.
             var playlist = entries
@@ -2155,6 +2158,7 @@
         document.getElementById('setting-shuffle-value').textContent       = I18n.t(Settings.get('shuffle') ? 'common.on' : 'common.off');
         document.getElementById('setting-aspect-mode-value').textContent   = AspectRatio.nameFor(Settings.get('aspectMode'));
         document.getElementById('setting-browse-filter-value').textContent = browseFilterName(Settings.get('browseFilter'));
+        document.getElementById('setting-show-hidden-value').textContent   = I18n.t(Settings.get('showHidden') ? 'common.on' : 'common.off');
         document.getElementById('setting-slideshow-interval-value').textContent = slideshowName(Settings.get('slideshowSeconds'));
         document.getElementById('setting-subtitle-size-value').textContent     = SubtitleStyle.nameForSize(Settings.get('subtitleSize'));
         document.getElementById('setting-subtitle-font-value').textContent     = SubtitleStyle.nameForFont(Settings.get('subtitleFont'));
@@ -2380,6 +2384,19 @@
             Settings.set('browseFilter', val);
             refreshSettingsValues();
             UI.toast(I18n.t('toast.setTo', I18n.t('settings.browseFilter'), browseFilterName(val)));
+        });
+    }
+    /* Dot-named files and folders in the USB, SMB and WebDAV lists (issue #147). */
+    function openShowHiddenPicker() {
+        pickerSetting = 'showHidden';
+        var cur = Settings.get('showHidden') ? 'on' : 'off';
+        openPicker(I18n.t('settings.showHidden'), [
+            { code: 'off', name: I18n.t('hidden.offOption') },
+            { code: 'on',  name: I18n.t('hidden.onOption') }
+        ], cur, function (val) {
+            Settings.set('showHidden', val === 'on');
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.showHidden'), I18n.t(val === 'on' ? 'common.on' : 'common.off')));
         });
     }
     /* How long each picture stays in a slideshow (issue #126). */

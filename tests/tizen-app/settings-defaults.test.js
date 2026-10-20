@@ -49,3 +49,8 @@ test('a fresh install keeps a Recently Played list; a TV that switched it off st
     // A stored blob from before the setting existed gets the default.
     assert.strictEqual(loadSettings({ autoPlay: false }).get('recentHistory'), true);
 });
+
+test('dot-named files stay hidden unless switched on (issue #147)', function () {
+    assert.strictEqual(loadSettings(null).get('showHidden'), false);
+    assert.strictEqual(loadSettings({ showHidden: true }).get('showHidden'), true);
+});

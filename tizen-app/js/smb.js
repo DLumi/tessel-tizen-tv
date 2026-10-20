@@ -420,9 +420,9 @@ var SMB = (function () {
             // looked up before the filter, which may hide pictures.
             var artName = FileTypes.folderArt(entries.map(function (e) { return e.isDir ? '' : e.name; }));
             var art = artName ? streamUrl(join(path, artName), current) : null;
-            var filter = Settings.get('browseFilter');
+            var filter = Settings.get('browseFilter'), showHidden = Settings.get('showHidden');
             entries = entries.filter(function (e) {
-                return FileTypes.shown(filter, e.isDir ? 'dir' : FileTypes.kind(e.name));
+                return (showHidden || !FileTypes.isHidden(e.name)) && FileTypes.shown(filter, e.isDir ? 'dir' : FileTypes.kind(e.name));
             });
             var playlist = entries
                 .filter(function (e) { return !e.isDir && isPlayable(e.name); })
