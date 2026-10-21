@@ -13,12 +13,12 @@ through Samsung's AVPlay.
 - **Music that plays on while you browse** — title, artist, album and cover art from ID3, FLAC, Ogg/Opus and M4A tags, a mini-player, repeat one / all, CH± to skip
 - **Pictures, text and playlists too** — a photo viewer with slideshow, a text viewer that reads Cyrillic and Western legacy encodings, and M3U / PLS lists (IPTV channels grouped by category) off a URL, USB or a share
 - **Cast a URL from your phone** — scan a QR once, paste a link, it plays. No account, no app
-- **Subtitles that actually show** — SRT / VTT / ASS / SAMI sidecars and embedded MP4 / MKV tracks, painted by the app with adjustable size, font, position and background
+- **Subtitles that actually show** — SRT / VTT / ASS / SAMI sidecars and embedded MP4 / MKV tracks, painted by the app with adjustable size, font, colour, weight, position and background, from Settings or the CC menu while a file plays
 - **Every embedded track selectable**, even past the TV demuxer's 32-track limit
 - **Resume or start over** — a half-watched file asks *Continue* or *Start from the beginning*; number keys jump by tenths
 - **Transcode server** for files the TV can't decode (DivX, DTS, TrueHD) and for real 5.1 to a soundbar — see [transcode-server](transcode-server/)
 - **INFO shows what's playing** — from the remote's INFO key or the INFO button in the player: codec, picture size and bitrate (where the stream declares one), HDR type with a warning for Dolby Vision (which Samsung TVs don't decode), audio and subtitle tracks
-- **Full remote support** — D-pad, media keys, aspect ratio, speed, repeat, shuffle, recent history (clear it, or switch it off, in Settings)
+- **Full remote support** — D-pad, media keys, aspect ratio, speed, repeat, shuffle, recent history (clear it, or switch it off, in Settings), and a start screen of your choice (*Settings → Start screen*: straight into your share, Back goes Home)
 
 ## Install
 
@@ -31,7 +31,7 @@ through Samsung's AVPlay.
    sdb install tessel.wgt
    ```
 
-Works on Tizen TVs from 2017 onward. SMB shares, DLNA and WebDAV servers need Tizen 4.0+ (2018 sets and later). Tested on a 2019 RU7020 and a 2023 S90C.
+Works on Tizen TVs from 2017 onward. SMB shares, DLNA and WebDAV servers need Tizen 4.0+ (2018 sets and later). Tested on a 2019 RU7020, a 2023 S90C and a 2024 QN90D (Tizen 9.0).
 
 ## Docs
 

@@ -273,6 +273,12 @@
                 <h3 id="subtitle-tracks-title" data-i18n="tracks.subtitle">Subtitle</h3>
                 <ul id="subtitle-tracks"></ul>
             </div>
+            <!-- Subtitle appearance without leaving the player (issue
+                 #149): the same pickers as Settings → Subtitle appearance. -->
+            <div class="track-section">
+                <h3 data-i18n="tracks.style">Subtitle style</h3>
+                <ul id="subtitle-style"></ul>
+            </div>
         </div>
         <button class="btn ghost" data-action="close-track-menu" data-focus data-i18n="common.close">Close</button>
     </div>
@@ -307,6 +313,10 @@
             <button class="settings-row" data-action="setting-ui-lang" data-focus>
                 <div class="settings-label" data-i18n="settings.uiLang">App language</div>
                 <div class="settings-value" id="setting-ui-lang-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-start-screen">
+                <div class="settings-label" data-i18n="settings.startScreen">Start screen</div>
+                <div class="settings-value" id="setting-start-screen-value">Home screen</div>
             </button>
             <button class="settings-row" data-action="setting-audio-lang">
                 <div class="settings-label" data-i18n="settings.audioLang">Preferred audio language</div>
@@ -375,6 +385,14 @@
             <button class="settings-row" data-action="setting-subtitle-font">
                 <div class="settings-label" data-i18n="settings.subFont">Subtitle font</div>
                 <div class="settings-value" id="setting-subtitle-font-value">Sans-serif</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-color">
+                <div class="settings-label" data-i18n="settings.subColor">Subtitle colour</div>
+                <div class="settings-value" id="setting-subtitle-color-value">White</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-weight">
+                <div class="settings-label" data-i18n="settings.subWeight">Subtitle weight</div>
+                <div class="settings-value" id="setting-subtitle-weight-value">Normal</div>
             </button>
             <button class="settings-row" data-action="setting-subtitle-position">
                 <div class="settings-label" data-i18n="settings.subPosition">Subtitle position</div>

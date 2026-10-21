@@ -27,6 +27,17 @@ function loadSettings(stored) {
     vm.runInContext(SRC, sandbox);
     return sandbox.module.exports.Settings;
 }
+function loadModules() {
+    var sandbox = {
+        module: { exports: {} },
+        localStorage: { getItem: function () { return null; }, setItem: function () {} },
+        navigator: { userAgent: 'test' },
+        document:  { createElement: function () { return { canPlayType: function () { return ''; } }; } }
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(SRC, sandbox);
+    return sandbox.module.exports;
+}
 
 test('a fresh install plays the next file automatically (issue #126)', function () {
     var s = loadSettings(null);
@@ -53,4 +64,39 @@ test('a fresh install keeps a Recently Played list; a TV that switched it off st
 test('dot-named files stay hidden unless switched on (issue #147)', function () {
     assert.strictEqual(loadSettings(null).get('showHidden'), false);
     assert.strictEqual(loadSettings({ showHidden: true }).get('showHidden'), true);
+});
+
+test('the app opens on Home unless a start screen was chosen (issue #149)', function () {
+    assert.strictEqual(loadSettings(null).get('startScreen'), 'home');
+    assert.strictEqual(loadSettings({ startScreen: 'smb' }).get('startScreen'), 'smb');
+    assert.strictEqual(loadSettings({ autoPlay: false }).get('startScreen'), 'home');
+});
+
+test('every start screen is a Home tile, and Home itself fires nothing', function () {
+    var StartScreen = loadModules().StartScreen;
+    var html = fs.readFileSync(path.join(__dirname, '../../tizen-app/index.html'), 'utf8');
+    var tiles = {};
+    var re = /<button class="tile" data-action="([^"]+)"/g, m;
+    while ((m = re.exec(html))) tiles[m[1]] = true;
+    assert.strictEqual(StartScreen.actionFor('home'), '');
+    StartScreen.forList().forEach(function (s) {
+        if (s.code === 'home') return;
+        assert.ok(tiles[s.action], s.code + ' → ' + s.action + ' is not a Home tile');
+    });
+    assert.strictEqual(StartScreen.actionFor('smb'), 'browse-smb');
+    // A value from a build that no longer has it falls back to Home.
+    assert.strictEqual(StartScreen.actionFor('nope'), '');
+});
+
+test('subtitles are white and normal weight unless changed; yellow is on offer (issue #149)', function () {
+    assert.strictEqual(loadSettings(null).get('subtitleColor'), 'white');
+    assert.strictEqual(loadSettings(null).get('subtitleWeight'), 'normal');
+    assert.strictEqual(loadSettings({ subtitleColor: 'yellow' }).get('subtitleColor'), 'yellow');
+    var SubtitleStyle = loadModules().SubtitleStyle;
+    var codes = SubtitleStyle.forColor().map(function (c) { return c.code; });
+    assert.ok(codes.indexOf('yellow') >= 0, 'yellow missing from ' + codes);
+    assert.strictEqual(SubtitleStyle.nameForColor('yellow'), 'Yellow');
+    assert.strictEqual(SubtitleStyle.nameForWeight('bold'), 'Bold');
+    // Unknown codes fall back to the first entry rather than throwing.
+    assert.strictEqual(SubtitleStyle.nameForColor('purple'), 'White');
 });
