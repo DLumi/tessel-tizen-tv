@@ -295,7 +295,7 @@
     </header>
 
     <div class="settings-content">
-        <div class="support-block">
+        <div class="support-block" id="support-block">
             <img src="ko-fi-qr.webp" alt="Ko-fi QR code" data-i18n-alt="settings.kofiAlt" class="support-qr">
             <div class="support-text">
                 <div class="support-headline" data-i18n="settings.enjoying">Enjoying Tessel?</div>
@@ -355,6 +355,10 @@
                 <div class="settings-label" data-i18n="settings.aspect">Video aspect ratio</div>
                 <div class="settings-value" id="setting-aspect-mode-value">Fit screen (keep black bars)</div>
             </button>
+            <button class="settings-row" data-action="setting-show-support">
+                <div class="settings-label" data-i18n="settings.showSupport">Show Ko-fi donation banner</div>
+                <div class="settings-value" id="setting-show-support-value">On</div>
+            </button>
         </div>
 
         <!-- Subtitle appearance is moved ABOVE the network-input sections
@@ -387,7 +391,7 @@
         </div>
 
         <h2 class="settings-section-title" data-i18n="cast.section">Cast from another device</h2>
-        <div class="support-block">
+        <div class="support-block" id="support-block">
             <div class="support-qr" id="pair-qr"></div>
             <div class="support-text">
                 <div class="support-headline" data-i18n="cast.headline">Cast a link to your TV</div>

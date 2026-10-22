@@ -363,6 +363,7 @@
   "dbg.exportFailed": "デバッグログを保存できませんでした: {0}",
   "settings.browseFilter": "ファイルブラウザーの表示",
   "settings.showHidden": "隠しファイルを表示",
+  "settings.showSupport": "Ko-fi の寄付バナーを表示",
   "settings.slideshow": "スライドショーの間隔",
   "browseFilter.all": "すべてのファイル",
   "browseFilter.media": "動画と音楽のみ",

@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Kon die foutopsporingslog nie stoor nie: {0}",
   "settings.browseFilter": "Lêerblaaier wys",
   "settings.showHidden": "Wys versteekte lêers",
+  "settings.showSupport": "Wys Ko-fi-skenkingsbanier",
   "settings.slideshow": "Skyfievertoning-interval",
   "browseFilter.all": "Alle lêers",
   "browseFilter.media": "Net video’s en musiek",

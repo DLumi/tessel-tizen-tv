@@ -54,3 +54,8 @@ test('dot-named files stay hidden unless switched on (issue #147)', function () 
     assert.strictEqual(loadSettings(null).get('showHidden'), false);
     assert.strictEqual(loadSettings({ showHidden: true }).get('showHidden'), true);
 });
+
+test('the Ko-fi banner shows until switched off', function () {
+    assert.strictEqual(loadSettings(null).get('showSupport'), true);
+    assert.strictEqual(loadSettings({ showSupport: false }).get('showSupport'), false);
+});

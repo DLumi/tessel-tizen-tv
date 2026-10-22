@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Hata ayıklama günlüğü kaydedilemedi: {0}",
   "settings.browseFilter": "Dosya tarayıcısı gösterir",
   "settings.showHidden": "Gizli dosyaları göster",
+  "settings.showSupport": "Ko-fi bağış afişini göster",
   "settings.slideshow": "Slayt gösterisi aralığı",
   "browseFilter.all": "Tüm dosyalar",
   "browseFilter.media": "Yalnızca video ve müzik",

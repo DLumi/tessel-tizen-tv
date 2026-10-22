@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Ladicí protokol se nepodařilo uložit: {0}",
   "settings.browseFilter": "Prohlížeč souborů zobrazuje",
   "settings.showHidden": "Zobrazit skryté soubory",
+  "settings.showSupport": "Zobrazit banner pro dar přes Ko-fi",
   "settings.slideshow": "Interval prezentace",
   "browseFilter.all": "Všechny soubory",
   "browseFilter.media": "Jen videa a hudbu",

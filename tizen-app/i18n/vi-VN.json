@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Không thể lưu nhật ký gỡ lỗi: {0}",
   "settings.browseFilter": "Trình duyệt tệp hiển thị",
   "settings.showHidden": "Hiện tệp ẩn",
+  "settings.showSupport": "Hiện biểu ngữ ủng hộ Ko-fi",
   "settings.slideshow": "Khoảng thời gian trình chiếu",
   "browseFilter.all": "Tất cả tệp",
   "browseFilter.media": "Chỉ video và nhạc",

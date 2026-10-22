@@ -363,6 +363,7 @@
   "dbg.exportFailed": "无法保存调试日志：{0}",
   "settings.browseFilter": "文件浏览器显示",
   "settings.showHidden": "显示隐藏文件",
+  "settings.showSupport": "显示 Ko-fi 捐赠横幅",
   "settings.slideshow": "幻灯片间隔",
   "browseFilter.all": "所有文件",
   "browseFilter.media": "仅视频和音乐",

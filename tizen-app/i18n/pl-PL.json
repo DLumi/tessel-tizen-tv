@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Nie udało się zapisać dziennika debugowania: {0}",
   "settings.browseFilter": "Przeglądarka plików pokazuje",
   "settings.showHidden": "Pokaż ukryte pliki",
+  "settings.showSupport": "Pokazuj baner darowizn Ko-fi",
   "settings.slideshow": "Odstęp pokazu slajdów",
   "browseFilter.all": "Wszystkie pliki",
   "browseFilter.media": "Tylko wideo i muzyka",

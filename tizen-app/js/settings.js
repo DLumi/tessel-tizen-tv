@@ -37,6 +37,8 @@ var Settings = (function () {
         // Off by default: on a stick or share written from a Mac those are
         // "._movie.mp4" companions and .DS_Store, which only get in the way.
         showHidden:       false,
+        // The Ko-fi QR block at the top of Settings.
+        showSupport:      true,
         // Route USB / internal-storage files through the paired transcode
         // server instead of straight into AVPlay.  Off by default: it only
         // helps when a transcode server is paired, and it costs the embedded

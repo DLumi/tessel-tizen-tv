@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Impossibile salvare il log di debug: {0}",
   "settings.browseFilter": "Il browser dei file mostra",
   "settings.showHidden": "Mostra file nascosti",
+  "settings.showSupport": "Mostra il banner per le donazioni Ko-fi",
   "settings.slideshow": "Intervallo presentazione",
   "browseFilter.all": "Tutti i file",
   "browseFilter.media": "Solo video e musica",

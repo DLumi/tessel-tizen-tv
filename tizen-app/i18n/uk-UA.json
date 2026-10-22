@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Не вдалося зберегти журнал налагодження: {0}",
   "settings.browseFilter": "Браузер файлів показує",
   "settings.showHidden": "Показувати приховані файли",
+  "settings.showSupport": "Показувати банер пожертв Ko-fi",
   "settings.slideshow": "Інтервал слайд-шоу",
   "browseFilter.all": "Усі файли",
   "browseFilter.media": "Лише відео й музику",

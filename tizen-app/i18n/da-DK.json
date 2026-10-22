@@ -363,6 +363,7 @@
   "dbg.exportFailed": "Kunne ikke gemme fejlfindingsloggen: {0}",
   "settings.browseFilter": "Filbrowseren viser",
   "settings.showHidden": "Vis skjulte filer",
+  "settings.showSupport": "Vis Ko-fi-donationsbanner",
   "settings.slideshow": "Diasshow-interval",
   "browseFilter.all": "Alle filer",
   "browseFilter.media": "Kun video og musik",

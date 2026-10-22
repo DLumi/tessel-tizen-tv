@@ -442,6 +442,7 @@
             case 'setting-aspect-mode':   openAspectPicker(); break;
             case 'setting-browse-filter': openBrowseFilterPicker(); break;
             case 'setting-show-hidden':   openShowHiddenPicker(); break;
+            case 'setting-show-support':  openShowSupportPicker(); break;
             case 'setting-slideshow-interval': openSlideshowPicker(); break;
             case 'setting-subtitle-size':     openSubtitlePicker('subtitleSize',     I18n.t('settings.subSize'),     SubtitleStyle.forSize());     break;
             case 'setting-subtitle-font':     openSubtitlePicker('subtitleFont',     I18n.t('settings.subFont'),     SubtitleStyle.forFont());     break;
@@ -2159,6 +2160,8 @@
         document.getElementById('setting-aspect-mode-value').textContent   = AspectRatio.nameFor(Settings.get('aspectMode'));
         document.getElementById('setting-browse-filter-value').textContent = browseFilterName(Settings.get('browseFilter'));
         document.getElementById('setting-show-hidden-value').textContent   = I18n.t(Settings.get('showHidden') ? 'common.on' : 'common.off');
+        document.getElementById('setting-show-support-value').textContent  = I18n.t(Settings.get('showSupport') ? 'common.on' : 'common.off');
+        document.getElementById('support-block').classList.toggle('hidden', !Settings.get('showSupport'));
         document.getElementById('setting-slideshow-interval-value').textContent = slideshowName(Settings.get('slideshowSeconds'));
         document.getElementById('setting-subtitle-size-value').textContent     = SubtitleStyle.nameForSize(Settings.get('subtitleSize'));
         document.getElementById('setting-subtitle-font-value').textContent     = SubtitleStyle.nameForFont(Settings.get('subtitleFont'));
@@ -2399,6 +2402,20 @@
             UI.toast(I18n.t('toast.setTo', I18n.t('settings.showHidden'), I18n.t(val === 'on' ? 'common.on' : 'common.off')));
         });
     }
+    /* The Ko-fi block at the top of Settings; someone who already donated
+     * can switch it off. */
+    function openShowSupportPicker() {
+        pickerSetting = 'showSupport';
+        var cur = Settings.get('showSupport') ? 'on' : 'off';
+        openPicker(I18n.t('settings.showSupport'), [
+            { code: 'off', name: I18n.t('common.off') },
+            { code: 'on',  name: I18n.t('common.on') }
+        ], cur, function (val) {
+            Settings.set('showSupport', val === 'on');
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.showSupport'), I18n.t(val === 'on' ? 'common.on' : 'common.off')));
+        });
+    }
     /* How long each picture stays in a slideshow (issue #126). */
     var SLIDESHOW_SECONDS = [3, 5, 10, 15, 30, 60];
     function slideshowName(sec) { return I18n.t('slideshow.seconds', sec); }
@@ -2578,7 +2595,7 @@
                 li.addEventListener('click', function () {
                     Player.setAudioTrack(tr.index);
                     UI.toast(I18n.t('toast.audio', tr.name));
-                    closeTrackMenu();
+                    markActiveTrack(li);
                 });
                 aUL.appendChild(li);
             });
@@ -2603,7 +2620,7 @@
                 if (how !== 'extracting') {
                     UI.toast(I18n.t(how === null ? 'tracks.cantShow' : 'toast.subtitle', tr.name));
                 }
-                closeTrackMenu();
+                if (how !== null) markActiveTrack(li);
             });
             sUL.appendChild(li);
         });
@@ -2618,6 +2635,12 @@
                     document.querySelector('#track-menu .track-section li:not(.muted)') ||
                     document.querySelector('#track-menu button');
         if (first) UI.focusOn(first);
+    }
+    /* Picking a track leaves the menu open, so audio and subtitles can be
+     * set in one visit; Back or Close dismisses it. */
+    function markActiveTrack(li) {
+        [].forEach.call(li.parentNode.children, function (el) { el.classList.remove('active'); });
+        li.classList.add('active');
     }
     function closeTrackMenu() {
         document.getElementById('track-menu').classList.add('hidden');
