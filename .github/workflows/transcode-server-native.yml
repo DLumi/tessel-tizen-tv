@@ -145,3 +145,25 @@ jobs:
           # was published most recently, so every transcode-v* tag quietly stole
           # it from the .wgt release.
           make_latest: false
+
+      # The app release carries the server zips too (build-wgt.yml attaches
+      # them when it runs).  A server tag that lands after the newest app
+      # release replaces that release's zips, and the version line in its
+      # notes, with this one.
+      - name: Attach to the latest app release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          APP_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+                      --jq '[.[] | select(.tagName | startswith("v"))] | sort_by(.createdAt) | last | .tagName // ""')
+          if [ -z "$APP_TAG" ]; then
+            echo "No app release yet; nothing to attach to."
+            exit 0
+          fi
+          gh release upload "$APP_TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+          gh release view "$APP_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          sed -i -E "s/^(- Transcode server: \`)[^\`]*\`/\1${TAG}\`/" notes.md
+          gh release edit "$APP_TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          echo "Attached $TAG zips to $APP_TAG"
