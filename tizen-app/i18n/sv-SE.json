@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Kunde inte spara felsökningsloggen: {0}",
   "settings.browseFilter": "Filbläddraren visar",
   "settings.showHidden": "Visa dolda filer",
+  "settings.showSupport": "Visa Ko-fi-donationsbanner",
   "settings.slideshow": "Bildspelsintervall",
   "browseFilter.all": "Alla filer",
   "browseFilter.media": "Bara video och musik",

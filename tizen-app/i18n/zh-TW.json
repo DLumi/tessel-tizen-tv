@@ -374,6 +374,7 @@
   "dbg.exportFailed": "無法儲存除錯記錄：{0}",
   "settings.browseFilter": "檔案瀏覽器顯示",
   "settings.showHidden": "顯示隱藏檔案",
+  "settings.showSupport": "顯示 Ko-fi 贊助橫幅",
   "settings.slideshow": "幻燈片間隔",
   "browseFilter.all": "所有檔案",
   "browseFilter.media": "僅影片和音樂",

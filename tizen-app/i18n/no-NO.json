@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Kunne ikke lagre feilsøkingsloggen: {0}",
   "settings.browseFilter": "Filleseren viser",
   "settings.showHidden": "Vis skjulte filer",
+  "settings.showSupport": "Vis Ko-fi-donasjonsbanner",
   "settings.slideshow": "Intervall for lysbildefremvisning",
   "browseFilter.all": "Alle filer",
   "browseFilter.media": "Bare video og musikk",

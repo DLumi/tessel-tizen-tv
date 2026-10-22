@@ -374,6 +374,7 @@
   "dbg.exportFailed": "디버그 로그를 저장할 수 없습니다: {0}",
   "settings.browseFilter": "파일 브라우저 표시",
   "settings.showHidden": "숨김 파일 표시",
+  "settings.showSupport": "Ko-fi 후원 배너 표시",
   "settings.slideshow": "슬라이드쇼 간격",
   "browseFilter.all": "모든 파일",
   "browseFilter.media": "동영상과 음악만",

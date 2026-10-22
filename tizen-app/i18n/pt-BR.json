@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Não foi possível salvar o log de depuração: {0}",
   "settings.browseFilter": "O navegador de arquivos mostra",
   "settings.showHidden": "Mostrar arquivos ocultos",
+  "settings.showSupport": "Mostrar o banner de doação do Ko-fi",
   "settings.slideshow": "Intervalo da apresentação de slides",
   "browseFilter.all": "Todos os arquivos",
   "browseFilter.media": "Somente vídeos e músicas",

@@ -374,6 +374,7 @@
   "dbg.exportFailed": "No s’ha pogut desar el registre de depuració: {0}",
   "settings.browseFilter": "El navegador de fitxers mostra",
   "settings.showHidden": "Mostra els fitxers ocults",
+  "settings.showSupport": "Mostra el bàner de donacions de Ko-fi",
   "settings.slideshow": "Interval de la presentació",
   "browseFilter.all": "Tots els fitxers",
   "browseFilter.media": "Només vídeos i música",

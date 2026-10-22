@@ -100,3 +100,8 @@ test('subtitles are white and normal weight unless changed; yellow is on offer (
     // Unknown codes fall back to the first entry rather than throwing.
     assert.strictEqual(SubtitleStyle.nameForColor('purple'), 'White');
 });
+
+test('the Ko-fi banner shows until switched off', function () {
+    assert.strictEqual(loadSettings(null).get('showSupport'), true);
+    assert.strictEqual(loadSettings({ showSupport: false }).get('showSupport'), false);
+});

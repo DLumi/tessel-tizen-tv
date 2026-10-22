@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Не удалось сохранить журнал отладки: {0}",
   "settings.browseFilter": "Браузер файлов показывает",
   "settings.showHidden": "Показывать скрытые файлы",
+  "settings.showSupport": "Показывать баннер пожертвований Ko-fi",
   "settings.slideshow": "Интервал слайд-шоу",
   "browseFilter.all": "Все файлы",
   "browseFilter.media": "Только видео и музыку",

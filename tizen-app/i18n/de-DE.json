@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Debug-Protokoll konnte nicht gespeichert werden: {0}",
   "settings.browseFilter": "Dateibrowser zeigt",
   "settings.showHidden": "Versteckte Dateien anzeigen",
+  "settings.showSupport": "Ko-fi-Spendenbanner anzeigen",
   "settings.slideshow": "Diashow-Intervall",
   "browseFilter.all": "Alle Dateien",
   "browseFilter.media": "Nur Videos und Musik",

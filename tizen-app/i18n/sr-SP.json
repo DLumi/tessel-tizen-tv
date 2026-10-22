@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Није могуће сачувати дневник отклањања грешака: {0}",
   "settings.browseFilter": "Прегледач датотека приказује",
   "settings.showHidden": "Прикажи скривене датотеке",
+  "settings.showSupport": "Прикажи Ko-fi банер за донације",
   "settings.slideshow": "Интервал слајд-шоуа",
   "browseFilter.all": "Све датотеке",
   "browseFilter.media": "Само видео и музику",

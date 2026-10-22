@@ -374,6 +374,7 @@
   "dbg.exportFailed": "تعذّر حفظ سجل التصحيح: {0}",
   "settings.browseFilter": "يعرض مستعرض الملفات",
   "settings.showHidden": "إظهار الملفات المخفية",
+  "settings.showSupport": "إظهار شعار التبرع عبر Ko-fi",
   "settings.slideshow": "الفاصل الزمني لعرض الشرائح",
   "browseFilter.all": "كل الملفات",
   "browseFilter.media": "الفيديو والموسيقى فقط",

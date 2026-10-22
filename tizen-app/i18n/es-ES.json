@@ -374,6 +374,7 @@
   "dbg.exportFailed": "No se pudo guardar el registro de depuración: {0}",
   "settings.browseFilter": "El explorador de archivos muestra",
   "settings.showHidden": "Mostrar archivos ocultos",
+  "settings.showSupport": "Mostrar el banner de donaciones de Ko-fi",
   "settings.slideshow": "Intervalo de la presentación",
   "browseFilter.all": "Todos los archivos",
   "browseFilter.media": "Solo vídeos y música",

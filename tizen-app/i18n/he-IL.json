@@ -374,6 +374,7 @@
   "dbg.exportFailed": "לא ניתן לשמור את יומן ניפוי השגיאות: {0}",
   "settings.browseFilter": "דפדפן הקבצים מציג",
   "settings.showHidden": "הצגת קבצים מוסתרים",
+  "settings.showSupport": "הצגת באנר התרומה של Ko-fi",
   "settings.slideshow": "מרווח מצגת",
   "browseFilter.all": "כל הקבצים",
   "browseFilter.media": "רק וידאו ומוזיקה",

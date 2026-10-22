@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Δεν ήταν δυνατή η αποθήκευση του αρχείου καταγραφής: {0}",
   "settings.browseFilter": "Η περιήγηση αρχείων δείχνει",
   "settings.showHidden": "Εμφάνιση κρυφών αρχείων",
+  "settings.showSupport": "Εμφάνιση banner δωρεάς Ko-fi",
   "settings.slideshow": "Διάστημα προβολής διαφανειών",
   "browseFilter.all": "Όλα τα αρχεία",
   "browseFilter.media": "Μόνο βίντεο και μουσική",

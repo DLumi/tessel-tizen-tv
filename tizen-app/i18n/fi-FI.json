@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Virheenkorjauslokia ei voitu tallentaa: {0}",
   "settings.browseFilter": "Tiedostoselain näyttää",
   "settings.showHidden": "Näytä piilotiedostot",
+  "settings.showSupport": "Näytä Ko-fi-lahjoitusbanneri",
   "settings.slideshow": "Diaesityksen väli",
   "browseFilter.all": "Kaikki tiedostot",
   "browseFilter.media": "Vain videot ja musiikki",

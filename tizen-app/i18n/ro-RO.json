@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Jurnalul de depanare nu a putut fi salvat: {0}",
   "settings.browseFilter": "Browserul de fișiere arată",
   "settings.showHidden": "Afișează fișierele ascunse",
+  "settings.showSupport": "Afișează bannerul de donații Ko-fi",
   "settings.slideshow": "Intervalul prezentării",
   "browseFilter.all": "Toate fișierele",
   "browseFilter.media": "Doar video și muzică",

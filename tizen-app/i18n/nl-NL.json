@@ -374,6 +374,7 @@
   "dbg.exportFailed": "Kon het debuglog niet opslaan: {0}",
   "settings.browseFilter": "Bestandsbrowser toont",
   "settings.showHidden": "Verborgen bestanden tonen",
+  "settings.showSupport": "Ko-fi-donatiebanner tonen",
   "settings.slideshow": "Interval diavoorstelling",
   "browseFilter.all": "Alle bestanden",
   "browseFilter.media": "Alleen video’s en muziek",
