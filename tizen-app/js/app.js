@@ -387,6 +387,21 @@
         if (!AspectRatio.isKnown(Settings.get('aspectMode'))) Settings.set('aspectMode', 'fit');
         updateAspectButton();        // reflect the saved aspect mode on the OSD
         SubtitleStyle.apply();       // push saved subtitle appearance onto the overlay
+        openStartScreen();           // straight on to the chosen screen (issue #149)
+    }
+
+    /* Open the screen Settings → Start screen names, as if its Home tile
+     * had been pressed: Home stays underneath, so Back from that screen
+     * lands there the same way it does after pressing the tile.  Recently
+     * Played switched off, or a list that turns out empty (its tile only
+     * toasts), leaves the app on Home. */
+    function openStartScreen() {
+        var code = Settings.get('startScreen');
+        var action = StartScreen.actionFor(code);
+        if (!action) return;
+        if (code === 'recent' && !Settings.get('recentHistory')) return;
+        if (typeof Debug !== 'undefined') Debug.view('start screen: ' + code);
+        handleAction(action);
     }
 
     /* ── Action dispatcher ────────────────────────────────────────── */
@@ -431,6 +446,7 @@
             case 'open-file-info':     toggleFileInfo(); break;
             case 'close-file-info':    closeTrackMenu(); break;
             case 'setting-ui-lang':       openUiLangPicker(); break;
+            case 'setting-start-screen':  openStartScreenPicker(); break;
             case 'setting-audio-lang':    openLangPicker('audioLang',    I18n.t('settings.audioLang'), LanguageList.forAudio());    break;
             case 'setting-subtitle-lang': openLangPicker('subtitleLang', I18n.t('settings.subtitleLang'), LanguageList.forSubtitle()); break;
             case 'setting-repeat-mode':   openRepeatPicker(); break;
@@ -446,6 +462,8 @@
             case 'setting-slideshow-interval': openSlideshowPicker(); break;
             case 'setting-subtitle-size':     openSubtitlePicker('subtitleSize',     I18n.t('settings.subSize'),     SubtitleStyle.forSize());     break;
             case 'setting-subtitle-font':     openSubtitlePicker('subtitleFont',     I18n.t('settings.subFont'),     SubtitleStyle.forFont());     break;
+            case 'setting-subtitle-color':    openSubtitlePicker('subtitleColor',    I18n.t('settings.subColor'),    SubtitleStyle.forColor());    break;
+            case 'setting-subtitle-weight':   openSubtitlePicker('subtitleWeight',   I18n.t('settings.subWeight'),   SubtitleStyle.forWeight());   break;
             case 'setting-subtitle-position': openSubtitlePicker('subtitlePosition', I18n.t('settings.subPosition'), SubtitleStyle.forPosition()); break;
             case 'setting-subtitle-bg':       openSubtitlePicker('subtitleBg',       I18n.t('settings.subBg'),       SubtitleStyle.forBg());       break;
             case 'close-picker':       closePicker(); break;
@@ -2150,6 +2168,7 @@
     }
     function refreshSettingsValues() {
         document.getElementById('setting-ui-lang-value').textContent       = uiLanguageName(Settings.get('uiLanguage'));
+        document.getElementById('setting-start-screen-value').textContent  = StartScreen.nameFor(Settings.get('startScreen'));
         document.getElementById('setting-audio-lang-value').textContent    = LanguageList.nameFor(Settings.get('audioLang'));
         document.getElementById('setting-subtitle-lang-value').textContent = LanguageList.nameFor(Settings.get('subtitleLang'));
         document.getElementById('setting-repeat-mode-value').textContent   = repeatName(Settings.get('repeatMode'));
@@ -2165,6 +2184,8 @@
         document.getElementById('setting-slideshow-interval-value').textContent = slideshowName(Settings.get('slideshowSeconds'));
         document.getElementById('setting-subtitle-size-value').textContent     = SubtitleStyle.nameForSize(Settings.get('subtitleSize'));
         document.getElementById('setting-subtitle-font-value').textContent     = SubtitleStyle.nameForFont(Settings.get('subtitleFont'));
+        document.getElementById('setting-subtitle-color-value').textContent    = SubtitleStyle.nameForColor(Settings.get('subtitleColor'));
+        document.getElementById('setting-subtitle-weight-value').textContent   = SubtitleStyle.nameForWeight(Settings.get('subtitleWeight'));
         document.getElementById('setting-subtitle-position-value').textContent = SubtitleStyle.nameForPosition(Settings.get('subtitlePosition'));
         document.getElementById('setting-subtitle-bg-value').textContent       = SubtitleStyle.nameForBg(Settings.get('subtitleBg'));
         // Mirror repeat + aspect state to the OSD buttons if visible
@@ -2218,7 +2239,15 @@
 
     /* ── Picker (generic option list, used for settings choices) ──── */
     var pickerSetting = null;        // which setting we're editing
+    /* The element that had the cursor when the picker opened, to put it
+     * back on close.  Without this the cursor stayed on the picker's hidden
+     * row: a hidden element has a zero rect at the top-left corner, so the
+     * next Up or Down in Settings jumped to whatever lay nearest that
+     * corner rather than the row below the one just changed (issue #149). */
+    var pickerReturnTo = null;
     function openPicker(title, options, currentValue, onPick) {
+        var had = document.querySelector('.focused');
+        if (had && !had.closest('#picker')) pickerReturnTo = had;
         document.getElementById('picker-title').textContent = title;
         var ul = document.getElementById('picker-options');
         ul.innerHTML = '';
@@ -2243,6 +2272,9 @@
         document.getElementById('picker').classList.add('hidden');
         pickerSetting = null;
         UI.refreshFocusables();
+        var back = pickerReturnTo; pickerReturnTo = null;
+        // Still on screen — the OSD may have faded, or the view changed.
+        if (back && back.offsetParent !== null) UI.focusOn(back);
     }
     function openLangPicker(settingKey, title, options) {
         pickerSetting = settingKey;
@@ -2290,7 +2322,17 @@
             Settings.set(settingKey, val);
             SubtitleStyle.apply();
             refreshSettingsValues();
+            refreshStyleRows();
             UI.toast(I18n.t('toast.updated', title));
+        });
+    }
+    /* Start screen (issue #149): Home, or one of its tiles opened at launch. */
+    function openStartScreenPicker() {
+        pickerSetting = 'startScreen';
+        openPicker(I18n.t('settings.startScreen'), StartScreen.forList(), Settings.get('startScreen'), function (val) {
+            Settings.set('startScreen', val);
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.startScreen'), StartScreen.nameFor(val)));
         });
     }
     /* Playback-speed picker (issue #28 part 3).  Six rates from 0.5× to 2×,
@@ -2561,7 +2603,7 @@
     function focusedTrackRow() {
         var el = document.querySelector('#track-menu li.focused');
         var ul = el && el.parentNode;
-        if (!ul || (ul.id !== 'audio-tracks' && ul.id !== 'subtitle-tracks')) return null;
+        if (!ul || (ul.id !== 'audio-tracks' && ul.id !== 'subtitle-tracks' && ul.id !== 'subtitle-style')) return null;
         return { list: ul.id, index: [].indexOf.call(ul.children, el) };
     }
     function restoreTrackRowFocus(mark) {
@@ -2572,8 +2614,57 @@
         UI.focusOn(li);
         return true;
     }
+    /* Subtitle appearance rows in the CC menu (issue #149): one per
+     * setting, each opening the same picker Settings uses.  The value
+     * labels are updated in place rather than re-rendered, so the cursor
+     * can come back to the row after the picker closes. */
+    var STYLE_ROWS = [
+        { key: 'subtitleSize',     label: 'settings.subSize',     options: function () { return SubtitleStyle.forSize(); },     name: function (c) { return SubtitleStyle.nameForSize(c); } },
+        { key: 'subtitleFont',     label: 'settings.subFont',     options: function () { return SubtitleStyle.forFont(); },     name: function (c) { return SubtitleStyle.nameForFont(c); } },
+        { key: 'subtitleColor',    label: 'settings.subColor',    options: function () { return SubtitleStyle.forColor(); },    name: function (c) { return SubtitleStyle.nameForColor(c); } },
+        { key: 'subtitleWeight',   label: 'settings.subWeight',   options: function () { return SubtitleStyle.forWeight(); },   name: function (c) { return SubtitleStyle.nameForWeight(c); } },
+        { key: 'subtitlePosition', label: 'settings.subPosition', options: function () { return SubtitleStyle.forPosition(); }, name: function (c) { return SubtitleStyle.nameForPosition(c); } },
+        { key: 'subtitleBg',       label: 'settings.subBg',       options: function () { return SubtitleStyle.forBg(); },       name: function (c) { return SubtitleStyle.nameForBg(c); } }
+    ];
+    function renderStyleRows() {
+        var ul = document.getElementById('subtitle-style');
+        ul.innerHTML = '';
+        STYLE_ROWS.forEach(function (r) {
+            var li = document.createElement('li');
+            li.className = 'style-row';
+            var name = document.createElement('span');
+            name.textContent = I18n.t(r.label);
+            var val = document.createElement('span');
+            val.className = 'style-value';
+            val.dataset.setting = r.key;
+            val.textContent = r.name(Settings.get(r.key));
+            li.appendChild(name); li.appendChild(val);
+            li.addEventListener('click', function () {
+                openSubtitlePicker(r.key, I18n.t(r.label), r.options());
+            });
+            ul.appendChild(li);
+        });
+    }
+    function refreshStyleRows() {
+        var vals = document.querySelectorAll('#subtitle-style .style-value');
+        for (var i = 0; i < vals.length; i++) {
+            for (var j = 0; j < STYLE_ROWS.length; j++)
+                if (STYLE_ROWS[j].key === vals[i].dataset.setting)
+                    vals[i].textContent = STYLE_ROWS[j].name(Settings.get(STYLE_ROWS[j].key));
+        }
+    }
+    /* The OSD button the CC / INFO menu opened from, so Up and Down on the
+     * OSD carry on from there once the menu closes (same hidden-row cursor
+     * problem as the picker, see pickerReturnTo). */
+    var trackMenuReturnTo = null;
+    function rememberMenuOpener() {
+        var had = document.querySelector('.focused');
+        if (had && !had.closest('#track-menu') && !had.closest('#file-info') && !had.closest('#picker'))
+            trackMenuReturnTo = had;
+    }
     function openTrackMenu() {
         var keepFocus = focusedTrackRow();
+        if (document.getElementById('track-menu').classList.contains('hidden')) rememberMenuOpener();
         var t = Player.getTracks();
         var aUL = document.getElementById('audio-tracks');
         var sUL = document.getElementById('subtitle-tracks');
@@ -2624,6 +2715,7 @@
             });
             sUL.appendChild(li);
         });
+        renderStyleRows();
 
         document.getElementById('track-menu').classList.remove('hidden');
         UI.refreshFocusables();
@@ -2643,9 +2735,13 @@
         li.classList.add('active');
     }
     function closeTrackMenu() {
+        var wasOpen = !document.getElementById('track-menu').classList.contains('hidden') ||
+                      !document.getElementById('file-info').classList.contains('hidden');
         document.getElementById('track-menu').classList.add('hidden');
         document.getElementById('file-info').classList.add('hidden');
         UI.refreshFocusables();
+        var back = trackMenuReturnTo; trackMenuReturnTo = null;
+        if (wasOpen && back && back.offsetParent !== null && state.view === 'player') UI.focusOn(back);
     }
 
     /* INFO (issue #128): what's playing, as far as the player can tell —
@@ -2656,6 +2752,7 @@
         var panel = document.getElementById('file-info');
         if (!panel.classList.contains('hidden')) { closeTrackMenu(); return; }
         closeTrackMenu();
+        rememberMenuOpener();
         var d = Player.describe();
         var dl = document.getElementById('file-info-list');
         dl.innerHTML = '';

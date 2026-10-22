@@ -10,6 +10,10 @@ var Settings = (function () {
         // Language of the app itself: '' = follow the TV, or a locale code
         // from I18n.languages() (nl-NL, pt-BR …).
         uiLanguage:       '',
+        // The screen the app opens on: 'home', or one of the Home tiles
+        // (see StartScreen below) for someone who always goes straight to
+        // the same share.  Back from that screen leads to Home as usual.
+        startScreen:      'home',
         audioLang:        '',          // '' = auto (use file's default), or ISO code
         subtitleLang:     'off',       // 'off' = no subs, '' = auto (file's default track), or ISO code
         repeatMode:       'off',       // 'off' | 'one' | 'all'
@@ -54,6 +58,8 @@ var Settings = (function () {
         // ── Subtitle appearance (applied to the painted overlay) ──────────
         subtitleSize:     'medium',    // 'small' | 'medium' | 'large' | 'xlarge'
         subtitleFont:     'sans',      // 'sans' | 'serif' | 'mono'
+        subtitleColor:    'white',     // 'white' | 'yellow' | 'cyan' | 'green'
+        subtitleWeight:   'normal',    // 'normal' | 'bold'
         subtitlePosition: 'bottom',    // 'bottom' | 'middle' | 'top'
         subtitleBg:       'none',      // 'none' | 'box'  (translucent box behind text)
         // ── Video geometry ────────────────────────────────────────────────
@@ -317,6 +323,19 @@ var SubtitleStyle = (function () {
         { code: 'serif', name: 'Serif',      nameKey: 'sub.font.serif', css: "Georgia,'Times New Roman',serif" },
         { code: 'mono',  name: 'Monospace',  nameKey: 'sub.font.mono',  css: "'Consolas','Courier New',monospace" }
     ];
+    // The CC colours TVs have offered since teletext: white, and the yellow
+    // most people who grew up with the TV's own subtitle menu are used to
+    // (issue #149).  Pure hues read best over a picture with a dark outline.
+    var COLOR = [
+        { code: 'white',  name: 'White',  nameKey: 'sub.color.white',  css: '#ffffff' },
+        { code: 'yellow', name: 'Yellow', nameKey: 'sub.color.yellow', css: '#ffee00' },
+        { code: 'cyan',   name: 'Cyan',   nameKey: 'sub.color.cyan',   css: '#00f0ff' },
+        { code: 'green',  name: 'Green',  nameKey: 'sub.color.green',  css: '#40ff40' }
+    ];
+    var WEIGHT = [
+        { code: 'normal', name: 'Normal', nameKey: 'sub.weight.normal', css: '500' },
+        { code: 'bold',   name: 'Bold',   nameKey: 'sub.weight.bold',   css: '700' }
+    ];
     var POSITION = [
         { code: 'bottom', name: 'Bottom', nameKey: 'sub.pos.bottom' },
         { code: 'middle', name: 'Middle', nameKey: 'sub.pos.middle' },
@@ -339,14 +358,18 @@ var SubtitleStyle = (function () {
      * ::cue position is driven by the cue's own line setting, not CSS. */
     function apply() {
         if (typeof Settings === 'undefined') return;
-        var size = find(SIZE, Settings.get('subtitleSize'));
-        var font = find(FONT, Settings.get('subtitleFont'));
-        var pos  = find(POSITION, Settings.get('subtitlePosition'));
-        var bg   = Settings.get('subtitleBg');
+        var size  = find(SIZE, Settings.get('subtitleSize'));
+        var font  = find(FONT, Settings.get('subtitleFont'));
+        var color = find(COLOR, Settings.get('subtitleColor'));
+        var wght  = find(WEIGHT, Settings.get('subtitleWeight'));
+        var pos   = find(POSITION, Settings.get('subtitlePosition'));
+        var bg    = Settings.get('subtitleBg');
 
         var root = document.documentElement;
         root.style.setProperty('--sub-size', size.px + 'px');
         root.style.setProperty('--sub-font', font.css);
+        root.style.setProperty('--sub-color', color.css);
+        root.style.setProperty('--sub-weight', wght.css);
 
         var ov = document.getElementById('subtitle-overlay');
         if (ov) {
@@ -366,6 +389,8 @@ var SubtitleStyle = (function () {
             'video::cue{' +
             'font-size:' + size.px + 'px;' +
             'font-family:' + font.css + ';' +
+            'color:' + color.css + ';' +
+            'font-weight:' + wght.css + ';' +
             (bg === 'box' ? 'background:rgba(0,0,0,.65);'
                           : 'background:transparent;') +
             '}';
@@ -374,13 +399,45 @@ var SubtitleStyle = (function () {
     return {
         forSize:     function () { return i18nList(SIZE); },
         forFont:     function () { return i18nList(FONT); },
+        forColor:    function () { return i18nList(COLOR); },
+        forWeight:   function () { return i18nList(WEIGHT); },
         forPosition: function () { return i18nList(POSITION); },
         forBg:       function () { return i18nList(BG); },
         nameForSize: function (c) { return nameFor(SIZE, c); },
         nameForFont: function (c) { return nameFor(FONT, c); },
+        nameForColor:  function (c) { return nameFor(COLOR, c); },
+        nameForWeight: function (c) { return nameFor(WEIGHT, c); },
         nameForPosition: function (c) { return nameFor(POSITION, c); },
         nameForBg:   function (c) { return nameFor(BG, c); },
         apply:       apply
+    };
+})();
+
+
+/* The screen the app opens on (issue #149): Home, or one of the Home tiles
+ * opened straight away as if it had been pressed.  `action` is the tile's
+ * data-action, so the list can't drift from what Home offers. */
+var StartScreen = (function () {
+    var SCREENS = [
+        { code: 'home',      name: 'Home screen',         nameKey: 'start.home',     action: '' },
+        { code: 'recent',    name: 'Recently Played',     nameKey: 'home.recent',    action: 'browse-recent' },
+        { code: 'favorites', name: 'Favorites',           nameKey: 'home.favorites', action: 'browse-favorites' },
+        { code: 'url',       name: 'Open Network Stream', nameKey: 'home.url',       action: 'open-url' },
+        { code: 'usb',       name: 'Browse USB Drive',    nameKey: 'home.usb',       action: 'browse-usb' },
+        { code: 'smb',       name: 'Browse SMB Share',    nameKey: 'home.smb',       action: 'browse-smb' },
+        { code: 'dlna',      name: 'Media Servers',       nameKey: 'home.dlna',      action: 'browse-dlna' },
+        { code: 'webdav',    name: 'WebDAV',              nameKey: 'home.webdav',    action: 'browse-webdav' }
+    ];
+    function find(code) {
+        for (var i = 0; i < SCREENS.length; i++) if (SCREENS[i].code === code) return SCREENS[i];
+        return SCREENS[0];
+    }
+    return {
+        forList: function () { return i18nList(SCREENS); },
+        find:    find,
+        nameFor: function (c) { return i18nName(find(c)); },
+        /* The Home tile action to fire at launch, or '' for Home itself. */
+        actionFor: function (c) { return find(c).action; }
     };
 })();
 
@@ -471,5 +528,6 @@ if (typeof module !== 'undefined' && module.exports)
         Settings:      Settings,
         LanguageList:  LanguageList,
         SubtitleStyle: SubtitleStyle,
+        StartScreen:   StartScreen,
         AspectRatio:   AspectRatio
     };
