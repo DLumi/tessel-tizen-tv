@@ -109,6 +109,26 @@ jobs:
             echo "date_pretty=$DATE_PRETTY"
           } >> "$GITHUB_OUTPUT"
 
+      # Non-Docker users download the server from the app release too, so it
+      # carries the five native zips of the newest transcode-v* release.  The
+      # transcode-server-native workflow does the same the other way round when
+      # a server tag lands after this release.
+      - name: Fetch latest transcode-server zips
+        id: server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+                  --jq '[.[] | select(.tagName | startswith("transcode-v"))] | sort_by(.createdAt) | last | .tagName // ""')
+          if [ -z "$TAG" ]; then
+            echo "No transcode-v* release found; the app release goes out without server zips."
+            exit 0
+          fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'tessel-transcode-*.zip' --dir release
+          ls -lh release/
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifact (per-run)
         uses: actions/upload-artifact@v4
         with:
@@ -121,7 +141,7 @@ jobs:
         with:
           tag_name: 'v${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.date_tag }}'
           name:    'Tessel v${{ steps.meta.outputs.version }} — ${{ steps.meta.outputs.date_pretty }}'
-          files:   release/*.wgt
+          files:   release/*
           body: |
             # Tessel — Tizen Web App
 
@@ -162,5 +182,6 @@ jobs:
             ## Whats in this build
             - All sources at the matching commit
             - Output: `tessel.wgt`
+            - Transcode server: `${{ steps.server.outputs.tag || 'none' }}` (native `tessel-transcode-*.zip` attached; Docker users pull `ghcr.io/patrickst1991/tessel-transcode`)
           draft:      false
           prerelease: false
