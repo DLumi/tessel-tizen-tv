@@ -58,7 +58,7 @@ jobs:
 
       - name: Patch profiles.xml with passwords
         # The CLI leaves passwords blank or pointed at .pwd files that don't
-        # exist on the runner — substitute literal passwords so signing works
+        # exist on the runner substitute literal passwords so signing works
         # non-interactively.
         run: |
           DATA_DIR="${GITHUB_WORKSPACE}/tizen-studio-data"
@@ -140,10 +140,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: 'v${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.date_tag }}'
-          name:    'Tessel v${{ steps.meta.outputs.version }} — ${{ steps.meta.outputs.date_pretty }}'
+          name:    'Tessel v${{ steps.meta.outputs.version }} ${{ steps.meta.outputs.date_pretty }}'
           files:   release/*
           body: |
-            # Tessel — Tizen Web App
+            # Tessel Tizen Web App
 
             Built ${{ steps.meta.outputs.date_pretty }} by GitHub Actions.
 
@@ -154,7 +154,7 @@ jobs:
 
 
             2. **Choose your installation method:**
-              ### ✅ Easy — via Apps2Samsung (recommended)
+              ### ✅ Easy via Apps2Samsung (recommended)
               Download and install automatically through [Apps2Samsung](https://apps2samsung.madebypatrick.nl/):
               - Open the app, select **Tizen Community** as the release channel
               - Pick **Tessel** and follow the on-screen steps
@@ -163,7 +163,7 @@ jobs:
 
               ---
                
-              ### 🔧 Manual — download & sideload yourself
+              ### 🔧 Manual download & sideload yourself
               > ⚠️ The `.wgt` in this release is signed with a generic CI cert and **will not match your TV's DUID**.
               > You must re-sign it with your own Samsung distributor certificate first.
             
