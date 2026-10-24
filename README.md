@@ -13,6 +13,7 @@ through Samsung's AVPlay.
 - **Music that plays on while you browse** — title, artist, album and cover art from ID3, FLAC, Ogg/Opus and M4A tags, a mini-player, repeat one / all, CH± to skip
 - **Pictures, text and playlists too** — a photo viewer with slideshow, a text viewer that reads Cyrillic and Western legacy encodings, and M3U / PLS lists (IPTV channels grouped by category) off a URL, USB or a share
 - **Cast a URL from your phone** — scan a QR once, paste a link, it plays. No account, no app
+- **Limit network access** — *Settings → Network access*: everything; only servers you set up (the default: no third-party services, so cast-from-phone and code pairing, which use ntfy.sh, ask first); or none, for a USB-only TV
 - **Subtitles that actually show** — SRT / VTT / ASS / SAMI sidecars and embedded MP4 / MKV tracks, painted by the app with adjustable size, font, colour, weight, position and background, from Settings or the CC menu while a file plays
 - **Every embedded track selectable**, even past the TV demuxer's 32-track limit
 - **Resume or start over** — a half-watched file asks *Continue* or *Start from the beginning*; number keys jump by tenths. A USB folder opens on the file to continue with, shows how long each file is and how far it got, and dims what's been watched; ◄ clears the watched state of a file, or of a whole folder

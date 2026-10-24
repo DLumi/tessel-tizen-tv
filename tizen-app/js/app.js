@@ -351,9 +351,9 @@
         switch (action) {
             case 'open-url':           openUrlView(); break;
             case 'browse-usb':         openBrowserAtRoot(); break;
-            case 'browse-smb':         SMB.openBrowser(); break;
-            case 'browse-dlna':        DLNA.openBrowser(); break;
-            case 'browse-webdav':      WebDAV.openBrowser(); break;
+            case 'browse-smb':         if (NetworkAccess.checkFeature(I18n.t('home.smb'), SMB.openBrowser)) SMB.openBrowser(); break;
+            case 'browse-dlna':        if (NetworkAccess.checkFeature(I18n.t('home.dlna'), DLNA.openBrowser)) DLNA.openBrowser(); break;
+            case 'browse-webdav':      if (NetworkAccess.checkFeature(I18n.t('home.webdav'), WebDAV.openBrowser)) WebDAV.openBrowser(); break;
             case 'browse-recent':      openRecent(); break;
             case 'browse-favorites':   openFavorites(); break;
             case 'open-settings':      openSettings(); break;
@@ -394,6 +394,7 @@
             case 'setting-auto-play':     openAutoPlayPicker(); break;
             case 'setting-resume-mode':   openResumeModePicker(); break;
             case 'setting-recent':        openRecentPicker(); break;
+            case 'setting-network':       openNetworkPicker(); break;
             case 'setting-recent-clear':  confirmRecentClear(); break;
             case 'setting-shuffle':       openShufflePicker(); break;
             case 'setting-aspect-mode':   openAspectPicker(); break;
@@ -418,6 +419,7 @@
         UI.showView('view-url'); state.view = 'url';
     }
     function openUrl(url, title) {
+        if (!NetworkAccess.check(url, null, function () { openUrl(url, title); })) return;
         title = title || urlBaseName(url);
         // A channel or song list can't go to AVPlay as it is (issue #110):
         // read it first.  An HLS manifest turns out to be one when read, and
@@ -587,6 +589,7 @@
      * playback fails. Pairing (code + QR) lives in Settings. */
     function fetchRemoteUrl() {
         if (typeof UrlDrop === 'undefined') { UI.toast(I18n.t('url.dropUnavailable')); return; }
+        if (!NetworkAccess.check(UrlDrop.service(), I18n.t('cast.section'), fetchRemoteUrl)) return;
         UI.toast(I18n.t('url.checking'));
         UrlDrop.fetchLatest(function (err, url) {
             if (err) {
@@ -888,6 +891,7 @@
     }
     function openFavorite(f) {
         if (typeof Debug !== 'undefined') Debug.action('favorite ' + f.kind + ' ' + f.path);
+        if (f.kind !== 'usb' && !NetworkAccess.checkFeature(f.name, function () { openFavorite(f); })) return;
         if (f.kind === 'smb') {
             // The SMB browser takes over the view and BACK; leaving the
             // folder walks up to the share root and out to Home as usual.
@@ -1230,6 +1234,7 @@
     function logoUrl(logo, src) {
         if (!logo) return null;
         var u = /^https?:/i.test(logo) ? logo : src.resolve(logo);
+        if (!NetworkAccess.allows(u)) return null;   // <img> loads bypass the XHR check, so check here
         return u && /^https?:/i.test(u) ? u : null;
     }
     /* A list of thousands of channels mustn't fetch thousands of pictures:
@@ -1361,6 +1366,7 @@
     var openWatchdog = null;
     function playUri(uri, title, opts) {
         opts = opts || {};
+        if (!NetworkAccess.check(uri, title, function () { playUri(uri, title, opts); })) return;
         if (typeof Debug !== 'undefined') Debug.player('playUri uri=' + uri + '  title=' + title);
 
         /* Issue #78: a file opened from a list or the URL screen that has a
@@ -2207,6 +2213,7 @@
         document.getElementById('setting-aspect-mode-value').textContent   = AspectRatio.nameFor(Settings.get('aspectMode'));
         document.getElementById('setting-browse-filter-value').textContent = browseFilterName(Settings.get('browseFilter'));
         document.getElementById('setting-show-hidden-value').textContent   = I18n.t(Settings.get('showHidden') ? 'common.on' : 'common.off');
+        document.getElementById('setting-network-value').textContent       = networkLevelName(NetworkAccess.level());
         document.getElementById('setting-show-support-value').textContent  = I18n.t(Settings.get('showSupport') ? 'common.on' : 'common.off');
         document.getElementById('support-block').classList.toggle('hidden', !Settings.get('showSupport'));
         document.getElementById('setting-slideshow-interval-value').textContent = slideshowName(Settings.get('slideshowSeconds'));
@@ -2541,6 +2548,40 @@
             UI.toast(I18n.t('toast.setTo', I18n.t('home.recent'), I18n.t(val === 'on' ? 'common.on' : 'common.off')));
         });
     }
+    /* ── Network access (js/network-access.js) ───────────────────── */
+    var NET_LEVELS = [
+        { code: 'all',  nameKey: 'net.all',  optionKey: 'net.allOption' },
+        { code: 'own',  nameKey: 'net.own',  optionKey: 'net.ownOption' },
+        { code: 'none', nameKey: 'net.none', optionKey: 'net.noneOption' }
+    ];
+    function networkLevelName(lvl) {
+        for (var i = 0; i < NET_LEVELS.length; i++) if (NET_LEVELS[i].code === lvl) return I18n.t(NET_LEVELS[i].nameKey);
+        return lvl;
+    }
+    function openNetworkPicker() {
+        pickerSetting = 'networkAccess';
+        openPicker(I18n.t('settings.network'), NET_LEVELS.map(function (l) {
+            return { code: l.code, name: I18n.t(l.optionKey) };
+        }), NetworkAccess.level(), function (val) {
+            Settings.set('networkAccess', val);
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.network'), networkLevelName(val)));
+        });
+    }
+    /* Show the dialog for a blocked action: keep the current level, or raise
+     * it to the level the action needs and retry. */
+    NetworkAccess.setPrompt(function (what, needed, retry) {
+        openPicker(I18n.t('net.needs', what), [
+            { code: 'keep',  name: I18n.t('net.keep') },
+            { code: 'allow', name: I18n.t(needed === 'all' ? 'net.allowAll' : 'net.allowOwn') }
+        ], 'keep', function (val) {
+            if (val !== 'allow') return;
+            Settings.set('networkAccess', needed);
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.network'), networkLevelName(needed)));
+            if (retry) retry();
+        });
+    });
     function confirmRecentClear() {
         if (!getRecent().length) { UI.toast(I18n.t('recent.none')); return; }
         openPicker(I18n.t('recent.clearConfirm'), [

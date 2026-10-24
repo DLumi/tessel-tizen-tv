@@ -932,12 +932,16 @@ var TranscodeServer = (function () {
             });
         });
 
-        if (findBtn) findBtn.addEventListener('click', runDiscovery);
+        if (findBtn) findBtn.addEventListener('click', function onFind() {
+            if (typeof NetworkAccess !== 'undefined' && !NetworkAccess.checkFeature(I18n.t('srv.find'), onFind)) return;
+            runDiscovery();
+        });
 
-        if (connectBtn) connectBtn.addEventListener('click', function () {
+        if (connectBtn) connectBtn.addEventListener('click', function onConnect() {
             var toast = function (m) { if (typeof UI !== 'undefined' && UI.toast) UI.toast(m); };
             var raw = addrInput ? addrInput.value : '';
             if (!String(raw).trim()) { toast(I18n.t('srv.typeAddress')); return; }
+            if (typeof NetworkAccess !== 'undefined' && !NetworkAccess.check(normalizeServerUrl(raw), null, onConnect)) return;
             toast(I18n.t('common.connecting'));
             connectTo(raw, function (err, srv) {
                 if (err) { toast(err.message); return; }
@@ -976,7 +980,8 @@ var TranscodeServer = (function () {
                 });
             });
         });
-        if (pairBtn) pairBtn.addEventListener('click', function () {
+        if (pairBtn) pairBtn.addEventListener('click', function onPair() {
+            if (typeof NetworkAccess !== 'undefined' && !NetworkAccess.check(NTFY_BASE, I18n.t('srv.pair'), onPair)) return;
             if (typeof UI !== 'undefined' && UI.toast) UI.toast(I18n.t('srv.pairSearching'));
             pair(function (err, ann) {
                 if (err) { if (UI && UI.toast) UI.toast(I18n.t('srv.pairFailed', err.message)); return; }

@@ -43,6 +43,11 @@ var Settings = (function () {
         showHidden:       false,
         // The Ko-fi QR block at the top of Settings.
         showSupport:      true,
+        // Network access level (see js/network-access.js): 'all'; 'own',
+        // which allows servers and URLs the user added but blocks
+        // third-party services (ntfy.sh, used by cast-from-phone and code
+        // pairing); or 'none', for USB and internal storage only.
+        networkAccess:    'own',       // 'all' | 'own' | 'none'
         // Route USB / internal-storage files through the paired transcode
         // server instead of straight into AVPlay.  Off by default: it only
         // helps when a transcode server is paired, and it costs the embedded

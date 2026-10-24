@@ -128,6 +128,8 @@ var UrlDrop = (function () {
         pageUrl:    pageUrl,
         deviceUrl:  deviceUrl,
         phoneUrl:   phoneUrl,
-        fetchLatest: fetchLatest
+        fetchLatest: fetchLatest,
+        // The URL fetchLatest() contacts, for the Network access check.
+        service:    function () { return adapter === n8nAdapter ? N8N_FETCH_URL : NTFY_BASE; }
     };
 })();
