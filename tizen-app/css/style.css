@@ -110,11 +110,12 @@ button:focus { outline: none; }
 /* ── Home tiles ───────────────────────────────────────────────────── */
 .home-tiles {
     display: grid; grid-gap: 16px;   /* grid-gap, not gap: TV WebView is Chromium 63 */
-    grid-template-columns: repeat(6, 280px);   /* 6×280 + 5×16 = 1760px, fits 1080p */
+    /* One 280px column per tile shown — six at most: 6×280 + 5×16 = 1760px,
+     * fits 1080p.  A hidden tile (Recently Played off, Servers with network
+     * access off) takes no column, and the rest stay centred. */
+    grid-auto-flow: column; grid-auto-columns: 280px;
     justify-content: center;
 }
-/* Recently Played switched off (issue #142): five tiles, still centred. */
-.home-tiles.no-recent { grid-template-columns: repeat(5, 280px); }
 
 .tile {
     background: var(--bg-card);
