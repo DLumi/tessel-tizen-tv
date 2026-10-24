@@ -10,6 +10,7 @@ through Samsung's AVPlay.
 - **USB, internal storage and SMB shares** — browse and stream from a NAS, Windows or Samba, with as many servers as you like; pin a folder to Favorites and the next episode is one step from the home screen; the `._` files and `.DS_Store` a Mac leaves behind stay out of the list (*Settings → Show hidden files*)
 - **DLNA media servers** — miniDLNA, Plex, Jellyfin, Serviio or a NAS's own server, found on the LAN without setting anything up
 - **WebDAV servers** — Nextcloud, ownCloud, a Synology or QNAP's WebDAV server, or a cloud drive, at home or over the internet; Basic and Digest login, self-signed certificates on request
+- **One Servers tile for all of them** — your SMB and WebDAV servers and the DLNA servers found on the LAN in one list; a single server opens straight away
 - **Music that plays on while you browse** — title, artist, album and cover art from ID3, FLAC, Ogg/Opus and M4A tags, a mini-player, repeat one / all, CH± to skip
 - **Pictures, text and playlists too** — a photo viewer with slideshow, a text viewer that reads Cyrillic and Western legacy encodings, and M3U / PLS lists (IPTV channels grouped by category) off a URL, USB or a share
 - **Cast a URL from your phone** — scan a QR once, paste a link, it plays. No account, no app

@@ -53,7 +53,7 @@
         try { localStorage.removeItem(RECENT_KEY); } catch (e) {}
     }
     /* The Home tile follows the setting (issue #142): hidden, the grid
-     * drops to six columns and the cursor starts on Favorites. */
+     * drops to five columns and the cursor starts on Favorites. */
     function applyRecentTile() {
         var on   = !!Settings.get('recentHistory');
         var tile = document.querySelector('.tile[data-action="browse-recent"]');
@@ -351,6 +351,9 @@
         switch (action) {
             case 'open-url':           openUrlView(); break;
             case 'browse-usb':         openBrowserAtRoot(); break;
+            case 'browse-servers':     if (NetworkAccess.checkFeature(I18n.t('home.servers'), Servers.openBrowser)) Servers.openBrowser(); break;
+            // No longer tiles — the Servers tile covers all three — but a
+            // start screen chosen before 1.31.0 still names one of them.
             case 'browse-smb':         if (NetworkAccess.checkFeature(I18n.t('home.smb'), SMB.openBrowser)) SMB.openBrowser(); break;
             case 'browse-dlna':        if (NetworkAccess.checkFeature(I18n.t('home.dlna'), DLNA.openBrowser)) DLNA.openBrowser(); break;
             case 'browse-webdav':      if (NetworkAccess.checkFeature(I18n.t('home.webdav'), WebDAV.openBrowser)) WebDAV.openBrowser(); break;

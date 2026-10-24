@@ -83,7 +83,13 @@ test('every start screen is a Home tile, and Home itself fires nothing', functio
         if (s.code === 'home') return;
         assert.ok(tiles[s.action], s.code + ' → ' + s.action + ' is not a Home tile');
     });
+    assert.strictEqual(StartScreen.actionFor('servers'), 'browse-servers');
+    // The tiles the Servers tile replaced (1.31.0) still open as chosen,
+    // but aren't on offer any more.
     assert.strictEqual(StartScreen.actionFor('smb'), 'browse-smb');
+    assert.strictEqual(StartScreen.actionFor('webdav'), 'browse-webdav');
+    assert.strictEqual(StartScreen.actionFor('dlna'), 'browse-dlna');
+    assert.strictEqual(StartScreen.forList().filter(function (s) { return /smb|dlna|webdav/.test(s.code); }).length, 0);
     // A value from a build that no longer has it falls back to Home.
     assert.strictEqual(StartScreen.actionFor('nope'), '');
 });
