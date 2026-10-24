@@ -62,45 +62,10 @@
         if (grid) grid.classList.toggle('no-recent', !on);
     }
 
-    /* ── Watched history (localStorage map uri → timestamp) ──────────
-     * Lets the browser mark already-seen episodes so navigating a series
-     * folder shows at a glance which files are done.  An item is marked
-     * watched when playback finishes (oncomplete) or when the user leaves
-     * after watching ≥ 90 % of it. */
-    var WATCHED_KEY = 'vlctv_watched_v1';
-    function getWatched() {
-        try { return JSON.parse(localStorage.getItem(WATCHED_KEY) || '{}'); }
-        catch (e) { return {}; }
-    }
-    function isWatched(uri) {
-        if (!uri) return false;
-        return !!getWatched()[uri];
-    }
-    function markWatched(uri) {
-        if (!uri) return;
-        // A finished file should start from the beginning next time.
-        clearResumePos(uri);
-        var w = getWatched();
-        if (w[uri]) return;
-        w[uri] = Date.now();
-        // Cap growth: drop the oldest entries once we pass 500.
-        var keys = Object.keys(w);
-        if (keys.length > 500) {
-            keys.sort(function (a, b) { return w[a] - w[b]; })
-                .slice(0, keys.length - 500)
-                .forEach(function (k) { delete w[k]; });
-        }
-        try { localStorage.setItem(WATCHED_KEY, JSON.stringify(w)); } catch (e) {}
-    }
-
-    /* ── Resume positions (localStorage map uri → {pos, dur, ts}) ─────
-     * Lets a reopened file continue from where the user left off.  The
-     * position is checkpointed every few seconds while playing (so it
-     * survives a power-off where exitPlayer never runs) and saved on
-     * exit / standby.  It's cleared once the file counts as watched
-     * (oncomplete or ≥ 90 %) so finished files restart from zero. */
-    var RESUME_KEY = 'vlctv_resume_v1';
-    var RESUME_MIN_MS = 30000;   // positions in the first 30 s aren't worth resuming
+    /* ── Watched marks and resume positions: js/watch-history.js ─────
+     * A file is marked watched when playback finishes (oncomplete) or the
+     * user leaves after ≥ 90 % of it; anything short of that keeps its
+     * position so the file can pick up where it left off. */
     /* Aim the resume seek this far BEFORE the saved position.  AVPlay can
      * only land on keyframes and rounds the seek target forward to the
      * next one (~5-6 s GOPs are typical), so an exact-target seek ends up
@@ -116,43 +81,6 @@
 
     // Where the error hints send people for the transcode server.
     var RELEASES_URL = 'github.com/PatrickSt1991/tessel-tizen-tv/releases';
-
-    function getResumeMap() {
-        try { return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}'); }
-        catch (e) { return {}; }
-    }
-    function setResumeMap(m) {
-        try { localStorage.setItem(RESUME_KEY, JSON.stringify(m)); } catch (e) {}
-    }
-    function resumePosFor(uri) {
-        if (!uri) return 0;
-        var r = getResumeMap()[uri];
-        return (r && r.pos > RESUME_MIN_MS) ? r.pos : 0;
-    }
-    function saveResumePos(uri, timeMs, durMs) {
-        if (!uri) return;
-        var m = getResumeMap();
-        if (!timeMs || timeMs < RESUME_MIN_MS) {
-            // Stopped near the start: drop any stale position so the next
-            // open starts clean instead of jumping to an old spot.
-            if (m[uri]) { delete m[uri]; setResumeMap(m); }
-            return;
-        }
-        m[uri] = { pos: Math.floor(timeMs), dur: Math.floor(durMs || 0), ts: Date.now() };
-        // Cap growth: drop the oldest entries once we pass 200.
-        var keys = Object.keys(m);
-        if (keys.length > 200) {
-            keys.sort(function (a, b) { return m[a].ts - m[b].ts; })
-                .slice(0, keys.length - 200)
-                .forEach(function (k) { delete m[k]; });
-        }
-        setResumeMap(m);
-    }
-    function clearResumePos(uri) {
-        if (!uri) return;
-        var m = getResumeMap();
-        if (m[uri]) { delete m[uri]; setResumeMap(m); }
-    }
 
     /* ── State ────────────────────────────────────────────────────── */
     var state = {
@@ -321,10 +249,10 @@
             if (canRestart !== prevRestartLit) { prevRestartLit = canRestart; updateNextPrevButtons(); }
             // Checkpoint the position every 5 s so it survives a power-off
             // or app kill where exitPlayer never gets a chance to run.
-            if (state.playingUri && lastProgress.time >= RESUME_MIN_MS &&
+            if (state.playingUri && lastProgress.time >= WatchHistory.RESUME_MIN_MS &&
                 Date.now() - lastResumeSaveAt > 5000) {
                 lastResumeSaveAt = Date.now();
-                saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
+                WatchHistory.saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
             }
         });
         Player.setListener('oncomplete', function () {
@@ -335,7 +263,7 @@
                 return;
             }
             // A file that played to the end counts as watched.
-            markWatched(state.playingUri);
+            WatchHistory.markWatched(state.playingUri);
             // Auto-play the next sibling if enabled and one exists; repeat-all
             // goes on by definition, wrapping round at the end.
             if ((Settings.get('autoPlay') || Settings.get('repeatMode') === 'all') && playNext(true)) return;
@@ -784,22 +712,31 @@
                 };
             }
 
+            // On return from the player or viewer, focus the entry just
+            // shown unless it is finished; otherwise focus the file to
+            // continue with.
+            var hist = WatchHistory.snapshot();
+            if (!focusUri || hist.state(focusUri).finished)
+                focusUri = hist.continueAt(playlist.map(function (p) { return p.uri; })) || focusUri;
+
             var focus = null;
             entries.forEach(function (e) {
                 var li = document.createElement('li');
                 li.dataset.uri = e.uri || '';
                 li.dataset.dir = e.isDir ? '1' : '0';
-                var watched = e.playable && isWatched(e.uri);
+                var seen = e.playable ? hist.state(e.uri) : null;
+                var watched = !!(seen && seen.watched);
                 if (watched) li.classList.add('watched-item');
                 if (e.kind === 'other') li.classList.add('unopenable');
-                var watchedBadge = watched ? '<span class="watched" title="' + escapeHtml(I18n.t('browse.watched')) + '">✓</span>' : '';
+                var progress = seen && seen.progress !== null
+                    ? '<span class="progress"><i style="width:' + Math.round(seen.progress * 100) + '%"></i></span>'
+                    : '';
                 var subBadge = (e.subtitles && e.subtitles.length)
                     ? '<span class="meta">CC ×' + e.subtitles.length + '</span>'
                     : '';
                 li.innerHTML =
-                    '<span class="icon">' + FileTypes.icon(e.kind) + '</span>' +
-                    '<span class="name">' + escapeHtml(e.name) + '</span>' +
-                    watchedBadge +
+                    watchedIcon(watched, e.kind) +
+                    '<span class="name">' + escapeHtml(e.name) + progress + '</span>' +
                     subBadge +
                     (e.isDir ? '<span class="fav-mark">♥</span>' :
                         '<span class="meta">' + Browser.humanSize(e.size) + '</span>');
@@ -997,12 +934,10 @@
         list.forEach(function (item, i) {
             var li = document.createElement('li');
             li.dataset.uri = item.uri;
-            var watched = isWatched(item.uri);
+            var watched = WatchHistory.isWatched(item.uri);
             if (watched) li.classList.add('watched-item');
-            var watchedBadge = watched ? '<span class="watched" title="' + escapeHtml(I18n.t('browse.watched')) + '">✓</span>' : '';
-            li.innerHTML = '<span class="icon">★</span>' +
+            li.innerHTML = watchedIcon(watched, 'recent') +
                            '<span class="name">' + escapeHtml(item.title) + '</span>' +
-                           watchedBadge +
                            '<span class="meta">' + escapeHtml(item.uri) + '</span>';
             li.addEventListener('click', function () {
                 playFromList('recent', playlist, i, null);
@@ -1326,7 +1261,7 @@
                 Debug.player('visibility=hidden: snapshot pos=' + standbySnapshot.pos + 'ms paused=' + standbySnapshot.paused);
             // Persist the exact position too — if the TV never wakes back
             // into the app, the next launch still resumes from here.
-            saveResumePos(state.playingUri, standbySnapshot.pos, lastProgress.duration);
+            WatchHistory.saveResumePos(state.playingUri, standbySnapshot.pos, lastProgress.duration);
             try { Player.stop(); } catch (e) {}
         } else if (document.visibilityState === 'visible') {
             if (!standbySnapshot) return;
@@ -1355,12 +1290,12 @@
          * player state, so BACK / Cancel simply leaves the user where they
          * were.  Next/Prev, auto-play and standby wakes never ask. */
         if (opts.askResume && !opts.resume &&
-            Settings.get('resumeMode') === 'ask' && resumePosFor(uri)) {
+            Settings.get('resumeMode') === 'ask' && WatchHistory.resumePosFor(uri)) {
             var again = {};
             for (var k in opts) again[k] = opts[k];
             again.askResume = false;
             openPicker(title || uri, [
-                { code: 'continue', name: I18n.t('resume.continueFrom', fmtTime(resumePosFor(uri))) },
+                { code: 'continue', name: I18n.t('resume.continueFrom', fmtTime(WatchHistory.resumePosFor(uri))) },
                 { code: 'restart',  name: I18n.t('resume.restart') }
             ], 'continue', function (val) {
                 again.fromStart = (val === 'restart');
@@ -1388,10 +1323,10 @@
         } else if (opts.fromStart || Settings.get('resumeMode') === 'never') {
             // Starting over: drop the saved position so the file also opens
             // clean next time (until playback saves a new one).
-            clearResumePos(uri);
+            WatchHistory.clearResumePos(uri);
             pendingResume = null;
         } else {
-            var resumeAt = resumePosFor(uri);
+            var resumeAt = WatchHistory.resumePosFor(uri);
             pendingResume = resumeAt
                 ? { pos: Math.max(0, resumeAt - RESUME_BACKOFF_MS), paused: false, announce: true }
                 : null;
@@ -1737,10 +1672,10 @@
         // Watched ≥ 90 % counts as seen even if the user stops before the end
         // (markWatched also drops the resume position); anything short of
         // that keeps its position so the file can pick up where it left off.
-        if (lastProgress.duration && lastProgress.time / lastProgress.duration >= 0.9)
-            markWatched(state.playingUri);
+        if (lastProgress.duration && lastProgress.time / lastProgress.duration >= WatchHistory.WATCHED_FRACTION)
+            WatchHistory.markWatched(state.playingUri);
         else if (lastProgress.time > 0)   // time===0 → playback never started;
-            saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
+            WatchHistory.saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
 
         resetScrub();
         Player.stop();
@@ -2148,6 +2083,13 @@
         document.getElementById('time-duration').textContent = fmtTime(durMs);
         var pct = (durMs && durMs > 0) ? Math.min(100, (timeMs / durMs) * 100) : 0;
         document.getElementById('progress-fill').style.width = pct.toFixed(1) + '%';
+    }
+
+    /* Return the row's icon: a check if the file is watched, otherwise the
+     * icon for kind ('recent' gives the Recently Played star). */
+    function watchedIcon(watched, kind) {
+        if (watched) return '<span class="icon" title="' + escapeHtml(I18n.t('browse.watched')) + '">✓</span>';
+        return '<span class="icon">' + (kind === 'recent' ? '★' : FileTypes.icon(kind)) + '</span>';
     }
 
     function fmtTime(ms) {

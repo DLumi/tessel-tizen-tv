@@ -1,0 +1,132 @@
+/* watch-history.js — tracks which files were watched and where playback
+ * stopped.
+ *
+ * Two localStorage maps, both carried by Settings → Backup:
+ *   vlctv_watched_v1   uri → when the file was last watched to the end (ms)
+ *   vlctv_resume_v1    uri → { pos, dur, ts }, the position to continue from
+ * A file counts as watched when it plays to the end or is stopped after
+ * 90 % (app.js makes that call).  Marking a file watched also clears its
+ * resume position.  Positions are checkpointed every few seconds while
+ * playing and saved on exit / standby.
+ *
+ * ES5 on purpose, like the rest of the app. */
+
+var WatchHistory = (function () {
+    'use strict';
+
+    var WATCHED_KEY = 'vlctv_watched_v1';
+    var RESUME_KEY  = 'vlctv_resume_v1';
+    var WATCHED_MAX = 500;
+    var RESUME_MAX  = 200;
+    var RESUME_MIN_MS = 30000;   // positions in the first 30 s aren't worth resuming
+    var WATCHED_FRACTION = 0.9;  // a file stopped past this fraction counts as watched
+
+    function create(storage, now) {
+        now = now || function () { return Date.now(); };
+
+        function read(key) {
+            try { return JSON.parse(storage.getItem(key) || '{}') || {}; }
+            catch (e) { return {}; }
+        }
+        function write(key, m) {
+            try { storage.setItem(key, JSON.stringify(m)); } catch (e) {}
+        }
+        /* Drop the oldest entries once the map passes its cap. */
+        function trim(m, max, tsOf) {
+            var keys = Object.keys(m);
+            if (keys.length <= max) return;
+            keys.sort(function (a, b) { return tsOf(m[a]) - tsOf(m[b]); })
+                .slice(0, keys.length - max)
+                .forEach(function (k) { delete m[k]; });
+        }
+
+        function isWatched(uri) {
+            return !!uri && !!read(WATCHED_KEY)[uri];
+        }
+        function markWatched(uri) {
+            if (!uri) return;
+            clearResumePos(uri);   // a finished file starts from the beginning next time
+            var w = read(WATCHED_KEY);
+            w[uri] = now();
+            trim(w, WATCHED_MAX, function (ts) { return ts; });
+            write(WATCHED_KEY, w);
+        }
+
+        function resumePosFor(uri) {
+            var r = uri ? read(RESUME_KEY)[uri] : null;
+            return (r && r.pos > RESUME_MIN_MS) ? r.pos : 0;
+        }
+        function saveResumePos(uri, timeMs, durMs) {
+            if (!uri) return;
+            var m = read(RESUME_KEY);
+            if (!timeMs || timeMs < RESUME_MIN_MS) {
+                // Stopped near the start: drop any stale position.
+                if (m[uri]) { delete m[uri]; write(RESUME_KEY, m); }
+                return;
+            }
+            m[uri] = { pos: Math.floor(timeMs), dur: Math.floor(durMs || 0), ts: now() };
+            trim(m, RESUME_MAX, function (r) { return r.ts; });
+            write(RESUME_KEY, m);
+        }
+        function clearResumePos(uri) {
+            if (!uri) return;
+            var m = read(RESUME_KEY);
+            if (m[uri]) { delete m[uri]; write(RESUME_KEY, m); }
+        }
+
+        /* Read both maps once and answer from that copy while a folder is
+         * drawn. */
+        function snapshot() {
+            var w = read(WATCHED_KEY), r = read(RESUME_KEY);
+
+            /* Return { watched, progress, finished, lastTs } for uri.
+             * progress is 0..1, or null if unknown; lastTs is 0 if the file
+             * was never played.  A resume entry is always newer than the
+             * watched mark (markWatched deletes it), so when present it
+             * determines progress and finished.  A position past
+             * WATCHED_FRACTION counts as finished even without a watched
+             * mark, e.g. when the TV was switched off during the credits. */
+            function state(uri) {
+                var ts = w[uri] || 0, pos = r[uri] || null;
+                var s = { watched: !!ts, progress: null, finished: !!ts && !pos,
+                          lastTs: Math.max(ts, pos ? pos.ts || 0 : 0) };
+                if (pos && pos.dur > 0) {
+                    s.progress = Math.min(1, pos.pos / pos.dur);
+                    s.finished = s.progress >= WATCHED_FRACTION;
+                }
+                return s;
+            }
+
+            /* Given a folder's playable uris in list order, return the one to
+             * put the cursor on: the most recently played file, or the next
+             * one if that file is finished.  Return null if none was played. */
+            function continueAt(uris) {
+                var best = -1, bestTs = 0;
+                for (var i = 0; i < uris.length; i++) {
+                    var ts = state(uris[i]).lastTs;
+                    if (ts > bestTs) { bestTs = ts; best = i; }
+                }
+                if (best < 0) return null;
+                if (state(uris[best]).finished && best + 1 < uris.length) best++;
+                return uris[best];
+            }
+
+            return { state: state, continueAt: continueAt };
+        }
+
+        return {
+            WATCHED_KEY: WATCHED_KEY, RESUME_KEY: RESUME_KEY,
+            RESUME_MIN_MS: RESUME_MIN_MS, WATCHED_FRACTION: WATCHED_FRACTION,
+            isWatched: isWatched, markWatched: markWatched,
+            resumePosFor: resumePosFor, saveResumePos: saveResumePos, clearResumePos: clearResumePos,
+            snapshot: snapshot
+        };
+    }
+
+    var api = create(typeof localStorage !== 'undefined' ? localStorage : null);
+    api.create = create;
+    return api;
+})();
+
+// Ignored by the Tizen/browser build; lets Node tests require these helpers.
+if (typeof module !== 'undefined' && module.exports) module.exports = WatchHistory;
