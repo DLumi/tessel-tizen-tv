@@ -316,7 +316,10 @@ var Mp4Subs = (function () {
     /* 'hvc1' → 'HEVC': the name a person knows a codec by; '' when unsure. */
     var CODEC_NAMES = { hvc1: 'HEVC', hev1: 'HEVC', dvh1: 'HEVC', dvhe: 'HEVC',
                         avc1: 'H.264', avc3: 'H.264', dva1: 'H.264', dvav: 'H.264',
-                        av01: 'AV1', vp09: 'VP9', vp08: 'VP8', mp4v: 'MPEG-4' };
+                        av01: 'AV1', vp09: 'VP9', vp08: 'VP8', mp4v: 'MPEG-4',
+                        mp4a: 'AAC', 'ac-3': 'AC-3', 'ec-3': 'E-AC-3', dtsc: 'DTS', dtsh: 'DTS-HD',
+                        dtsl: 'DTS-HD', dtse: 'DTS', mlpa: 'TrueHD', fLaC: 'FLAC', Opus: 'Opus',
+                        alac: 'ALAC', '.mp3': 'MP3' };
     function codecName(fourCC) { return CODEC_NAMES[String(fourCC || '')] || ''; }
 
     /* Filter tracks → just the text subtitles we can decode + extract their cues. */
@@ -1428,6 +1431,7 @@ var Mp4Subs = (function () {
         openReader:    function (file, cb) {
             openIncrementalReader(file, normalizeIncrementalOptions({}), cb);
         },
+        readBoxHeader: readBoxHeader,   // used by media-info.js to walk the top-level boxes
         cuesToSrt:     cuesToSrt,
         _extractCueLists: extractCueLists,
         _parseMp4:     parseMp4,

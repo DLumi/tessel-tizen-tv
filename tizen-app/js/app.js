@@ -122,6 +122,15 @@
     var lastProgress = { time: 0, duration: 0 };
     // Throttle for the periodic resume-position checkpoint.
     var lastResumeSaveAt = 0;
+    // Set once the current file's duration has been passed to MediaInfo.
+    var durationNoted = false;
+    /* Store the duration AVPlay reports for the browser's length column.
+     * Only USB files are stored, since only they carry a File object. */
+    function noteDuration(ms) {
+        var item = state.playlist[state.playlistIndex];
+        if (!item || !item.file || item.uri !== state.playingUri) return;
+        MediaInfo.put({ uri: item.uri, size: item.file.fileSize, mtime: item.file.modified }, { dur: ms });
+    }
     // Whether the OSD Prev button is currently lit as "Restart".
     var prevRestartLit = false;
 
@@ -232,6 +241,10 @@
         });
         Player.setListener('onprogress', function (p) {
             lastProgress = { time: (p && p.time) || 0, duration: (p && p.duration) || 0 };
+            if (lastProgress.duration && !durationNoted) {
+                durationNoted = true;
+                noteDuration(lastProgress.duration);
+            }
             // A committed scrub seek stays "waiting" until the playhead
             // lands near its target (async AVPlay seeks report the pre-seek
             // position for a while), with a timeout for failed seeks.
@@ -719,7 +732,7 @@
             if (!focusUri || hist.state(focusUri).finished)
                 focusUri = hist.continueAt(playlist.map(function (p) { return p.uri; })) || focusUri;
 
-            var focus = null;
+            var focus = null, rows = [];   // rows whose duration is still unknown
             entries.forEach(function (e) {
                 var li = document.createElement('li');
                 li.dataset.uri = e.uri || '';
@@ -736,13 +749,18 @@
                 var subBadge = (e.subtitles && e.subtitles.length)
                     ? '<span class="meta">CC ×' + e.subtitles.length + '</span>'
                     : '';
+                // Show the cached duration, if any; fillLengths() probes the others.
+                var media = e.playable ? MediaInfo.get(e) : null;
+                var length = media ? media.dur : null;
                 li.innerHTML =
                     watchedIcon(watched, e.kind) +
                     '<span class="name">' + escapeHtml(e.name) + progress + '</span>' +
                     subBadge +
                     (e.isDir ? '<span class="fav-mark">♥</span>' :
+                        (e.playable ? '<span class="meta length">' + (length ? fmtLength(length) : '') + '</span>' : '') +
                         '<span class="meta">' + Browser.humanSize(e.size) + '</span>');
                 if (e.isDir) markFavoriteRow(li, usbFavorite(e.file, e.name));
+                else if (e.playable && !media) rows.push({ entry: e, li: li });
                 li.addEventListener('click', function () {
                     switch (e.kind) {
                         case 'dir':
@@ -783,7 +801,35 @@
             markNowPlaying();
             UI.refreshFocusables();
             UI.focusOn(focus || ul.firstElementChild);
+            fillLengths(rows);
         });
+    }
+
+    /* Read the durations a folder listing didn't have cached, two files at
+     * a time, and write them into the rows.  Opening another listing
+     * cancels the previous queue. */
+    var lengthsRun = 0;
+    function fillLengths(rows) {
+        var run = ++lengthsRun, queue = rows.slice(), busy = 0, draining = false;
+        function one(row) {
+            busy++;
+            MediaInfo.lookup(row.entry, function (err, media) {
+                busy--;
+                if (run !== lengthsRun) return;
+                if (err && typeof Debug !== 'undefined') Debug.browse('header of ' + row.entry.name + ': ' + (err.message || err));
+                if (media && media.dur) row.li.querySelector('.length').textContent = fmtLength(media.dur);
+                next();
+            });
+        }
+        // Loop rather than recurse: lookup() may call back synchronously
+        // (unparsed containers).
+        function next() {
+            if (draining) return;
+            draining = true;
+            while (busy < 2 && queue.length && run === lengthsRun) one(queue.shift());
+            draining = false;
+        }
+        next();
     }
 
     /* ── Favorites (issue #140) ───────────────────────────────────── */
@@ -1341,6 +1387,7 @@
         prefsAppliedFor = null;
         lastProgress = { time: 0, duration: 0 };
         lastResumeSaveAt = 0;
+        durationNoted = false;
         prevRestartLit = false;
         resetScrub();          // a scrub/settle from the previous file must
                                // not freeze the new file's progress bar
@@ -2116,6 +2163,12 @@
         document.getElementById('time-duration').textContent = fmtTime(durMs);
         var pct = (durMs && durMs > 0) ? Math.min(100, (timeMs / durMs) * 100) : 0;
         document.getElementById('progress-fill').style.width = pct.toFixed(1) + '%';
+    }
+
+    /* Format a duration for the browser's length column: "23m", "1h47m". */
+    function fmtLength(ms) {
+        var m = Math.round(ms / 60000), h = Math.floor(m / 60);
+        return (h ? h + 'h' : '') + (m % 60) + 'm';
     }
 
     /* Return the row's icon: a check if the file is watched, otherwise the

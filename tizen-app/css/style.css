@@ -351,6 +351,8 @@ button:focus { outline: none; }
  * unwatched episodes stand out in a series folder. */
 .browse-list li.watched-item > * { opacity: .5; }
 .browse-list li.watched-item .icon { color: var(--fg-mute); }
+/* Duration column; a fixed width keeps the size column aligned. */
+.browse-list .length { min-width: 72px; text-align: right; }
 /* Progress bar under the name of a partly watched file. */
 .browse-list .progress {
     display: block;
