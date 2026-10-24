@@ -13,9 +13,10 @@ through Samsung's AVPlay.
 - **Music that plays on while you browse** — title, artist, album and cover art from ID3, FLAC, Ogg/Opus and M4A tags, a mini-player, repeat one / all, CH± to skip
 - **Pictures, text and playlists too** — a photo viewer with slideshow, a text viewer that reads Cyrillic and Western legacy encodings, and M3U / PLS lists (IPTV channels grouped by category) off a URL, USB or a share
 - **Cast a URL from your phone** — scan a QR once, paste a link, it plays. No account, no app
+- **Limit network access** — *Settings → Network access*: everything; only servers you set up (the default: no third-party services, so cast-from-phone and code pairing, which use ntfy.sh, ask first); or none, for a USB-only TV
 - **Subtitles that actually show** — SRT / VTT / ASS / SAMI sidecars and embedded MP4 / MKV tracks, painted by the app with adjustable size, font, colour, weight, position and background, from Settings or the CC menu while a file plays
 - **Every embedded track selectable**, even past the TV demuxer's 32-track limit
-- **Resume or start over** — a half-watched file asks *Continue* or *Start from the beginning*; number keys jump by tenths
+- **Resume or start over** — a half-watched file asks *Continue* or *Start from the beginning*; number keys jump by tenths. A USB folder opens on the file to continue with, shows how long each file is and how far it got, and dims what's been watched; ◄ clears the watched state of a file, or of a whole folder
 - **Transcode server** for files the TV can't decode (DivX, DTS, TrueHD) and for real 5.1 to a soundbar — see [transcode-server](transcode-server/)
 - **INFO shows what's playing** — from the remote's INFO key or the INFO button in the player: codec, picture size and bitrate (where the stream declares one), HDR type with a warning for Dolby Vision (which Samsung TVs don't decode), audio and subtitle tracks
 - **Full remote support** — D-pad, media keys, aspect ratio, speed, repeat, shuffle, recent history (clear it, or switch it off, in Settings), and a start screen of your choice (*Settings → Start screen*: straight into your share, Back goes Home)
@@ -38,6 +39,7 @@ Works on Tizen TVs from 2017 onward. SMB shares, DLNA and WebDAV servers need Ti
 - [Playback notes](docs/PLAYBACK-NOTES.md) — files the TV can't decode, 5.1 that comes out as stereo, and what to do about it
 - [Transcode server](transcode-server/README.md) — Docker or native binaries, pairing, surround, hardware acceleration
 - [Cast from another device](docs/SEND-URL-FROM-DEVICE.md) — how the phone-to-TV link works and how to host your own page
+- [Files onto the USB stick from your PC](docs/REMOTE.md) — `scripts/tessel-remote`: list the stick, push videos into a folder, no setup
 - [Reading the app's log](docs/DEBUG-LOG.md) — DevTools via Apps2Samsung, SMB trail, remote log capture
 - [Why a web app and not native](docs/WHY-WEB-APP.md)
 

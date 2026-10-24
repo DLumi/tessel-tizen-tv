@@ -347,15 +347,22 @@ button:focus { outline: none; }
     font-size: 18px;
     flex-shrink: 0;
 }
-/* Watched indicator: a green check on already-seen items, with the row
- * dimmed so unseen episodes stand out when scanning a series folder. */
-.browse-list .watched {
-    flex-shrink: 0;
-    color: #5cb85c;
-    font-size: 20px;
-    font-weight: 700;
+/* Watched file: the icon becomes a check and the row is dimmed, so
+ * unwatched episodes stand out in a series folder. */
+.browse-list li.watched-item > * { opacity: .5; }
+.browse-list li.watched-item .icon { color: var(--fg-mute); }
+/* Duration column; a fixed width keeps the size column aligned. */
+.browse-list .length { min-width: 72px; text-align: right; }
+/* Progress bar under the name of a partly watched file. */
+.browse-list .progress {
+    display: block;
+    height: 4px;
+    margin-top: 8px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
 }
-.browse-list li.watched-item .name { color: var(--fg-mute); }
+.browse-list .progress i { display: block; height: 100%; background: var(--accent); }
 /* Playlist filter (issue #122), above the list. */
 .playlist-filter { width: 100%; max-width: 1400px; margin-bottom: 16px; }
 .playlist-filter input {
@@ -387,7 +394,6 @@ button:focus { outline: none; }
 /* A folder pinned to Favorites (issue #140). */
 .browse-list .fav-mark { display: none; flex-shrink: 0; color: var(--accent); font-size: 22px; }
 .browse-list li.is-fav .fav-mark { display: inline; }
-.browse-list li.watched-item .icon { opacity: .6; }
 
 /* ── Player ───────────────────────────────────────────────────────── */
 #player-object {

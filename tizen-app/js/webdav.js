@@ -112,6 +112,9 @@ var WebDAV = (function () {
     function connect(id, cb) {
         var s = serverById(id);
         if (!s) return cb(new Error(I18n.t('dav.serverGone')));
+        if (typeof NetworkAccess !== 'undefined' &&
+            !NetworkAccess.check(s.url, null, function () { connect(id, cb); }))
+            return cb(NetworkAccess.refusal(NetworkAccess.hostOf(s.url)));
         dbg('connect -> ' + s.url + ' [' + id + '] user=' + (s.user || '(none)') + (s.insecure ? ' insecure' : ''));
         postJson(BASE + '/dav/connect', { id: id, url: s.url, user: s.user || '', pass: s.pass || '', insecure: !!s.insecure },
                  function (err, res) {

@@ -1397,6 +1397,11 @@ var Player = (function () {
 
     function open(url, opts) {
         opts = opts || {};
+        // Last-resort Network access check; app.js normally checks before this.
+        if (typeof NetworkAccess !== 'undefined' && !NetworkAccess.allows(url)) {
+            emit('onerror', NetworkAccess.refusal(NetworkAccess.hostOf(url)).message);
+            return;
+        }
         cancelEmbeddedSubExtraction('opening another file');
         containerSubTracks = [];        // previous file's header list
         ++lastContainerListToken;       // and any header read still in flight

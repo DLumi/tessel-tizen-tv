@@ -152,6 +152,9 @@ var SMB = (function () {
 
     /* ── launch the hybrid service, then wait for it to answer /smb/ping ──── */
     function ensureService(cb) {
+        // Don't start the service when Network access is 'none'.
+        if (typeof NetworkAccess !== 'undefined' && NetworkAccess.level() === 'none')
+            return cb(NetworkAccess.refusal(I18n.t('home.smb')));
         try {
             var appId = tizen.application.getCurrentApplication().appInfo.id;
             var pkgId = appId.split('.')[0];
@@ -175,6 +178,9 @@ var SMB = (function () {
 
     function connect(id, cb) {
         var c = serverById(id) || {};
+        if (typeof NetworkAccess !== 'undefined' &&
+            !NetworkAccess.check('smb://' + (c.host || ''), c.host, function () { connect(id, cb); }))
+            return cb(NetworkAccess.refusal(c.host || I18n.t('home.smb')));
         dbg('connect -> ' + (c.host || '?') + '\\' + (c.share || '?') + (id ? ' [' + id + ']' : '') +
             ' user=' + (c.anonymous ? '(guest)' : (c.user || '(none)')));
         postJson(BASE + '/smb/connect', {

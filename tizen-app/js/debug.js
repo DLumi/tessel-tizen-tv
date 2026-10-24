@@ -76,6 +76,7 @@ var Debug = (function () {
 
         if (!active()) return;
         var dest = url();
+        if (typeof NetworkAccess !== 'undefined' && !NetworkAccess.allows(dest)) return;
         try {
             var x = new XMLHttpRequest();
             x.open('POST', dest, true);

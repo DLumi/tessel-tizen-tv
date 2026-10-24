@@ -97,6 +97,7 @@ var MkvSubs = (function () {
     var ID_SEGMENT       = 0x18538067;
     var ID_INFO          = 0x1549A966;
     var ID_TIMECODESCALE = 0x2AD7B1;
+    var ID_DURATION      = 0x4489;     // float, in TimecodeScale ticks
     var ID_TRACKS        = 0x1654AE6B;
     var ID_TRACKENTRY    = 0xAE;
     var ID_TRACKNUMBER   = 0xD7;
@@ -589,13 +590,13 @@ var MkvSubs = (function () {
         var reader = null;
         var called = false;
 
-        function done(err, tracks) {
+        function done(err, tracks, layout) {
             if (called) return;
             called = true;
             if (reader && reader !== source && reader.close) {
                 try { reader.close(); } catch (e) {}
             }
-            cb(err, tracks || []);
+            cb(err, tracks || [], layout || null);
         }
 
         openRangeReader(source, function (oerr, r) {
@@ -605,7 +606,7 @@ var MkvSubs = (function () {
                 if (serr) { done(serr); return; }
                 if (!(size > 0)) { done(Error('unknown file size')); return; }
                 readLayout(reader, size, function (lerr, layout) {
-                    done(lerr, layout && layout.tracks);
+                    done(lerr, layout && layout.tracks, layout);
                 });
             });
         });
@@ -626,6 +627,7 @@ var MkvSubs = (function () {
             segmentDataStart: -1,
             timecodeScale:    1000000,   // 1 ms per tick unless Info says otherwise
             tracks:           [],
+            duration:         0,         // ms, from Segment Info; 0 if absent
             tracksPos:        -1,
             tracksSize:       0,
             cuesPos:          -1,        // Cues body, absolute; -1 when unknown
@@ -656,11 +658,16 @@ var MkvSubs = (function () {
         }
 
         function readInfo(view, bodyOff, bodyEnd) {
+            var ticks = 0;
             walk(view, bodyOff, bodyEnd, function (id, o, e) {
-                if (id !== ID_TIMECODESCALE) return;
-                var v = readUint(view, o, e - o);
-                if (v > 0) layout.timecodeScale = v;
+                if (id === ID_TIMECODESCALE) {
+                    var v = readUint(view, o, e - o);
+                    if (v > 0) layout.timecodeScale = v;
+                } else if (id === ID_DURATION) {
+                    ticks = e - o === 8 ? view.getFloat64(o) : e - o === 4 ? view.getFloat32(o) : 0;
+                }
             });
+            if (ticks > 0) layout.duration = Math.round(ticks * layout.timecodeScale / 1e6);
         }
         function readSeekHead(view, bodyOff, bodyEnd) {
             walk(view, bodyOff, bodyEnd, function (id, o, e) {

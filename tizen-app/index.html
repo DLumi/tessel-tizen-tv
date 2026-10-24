@@ -166,6 +166,7 @@
         <span class="key">PLAY</span> <span data-i18n="hint.openAsMedia">open as media</span>
         <span class="hidden" id="hint-save"><span class="key">►</span> <span data-i18n="hint.saveChannel">save / unsave</span></span>
         <span class="hidden" id="hint-fav"><span class="key">►</span> <span data-i18n="hint.favorite">pin / unpin folder</span></span>
+        <span class="hidden" id="hint-forget"><span class="key">◄</span> <span data-i18n="hint.forgetWatched">forget watched</span></span>
     </footer>
 </section>
 
@@ -357,6 +358,10 @@
                 <div class="settings-label" data-i18n="settings.showHidden">Show hidden files</div>
                 <div class="settings-value" id="setting-show-hidden-value">Off</div>
             </button>
+            <button class="settings-row" data-action="setting-network">
+                <div class="settings-label" data-i18n="settings.network">Network access</div>
+                <div class="settings-value" id="setting-network-value">Servers you set up</div>
+            </button>
             <button class="settings-row" data-action="setting-slideshow-interval">
                 <div class="settings-label" data-i18n="settings.slideshow">Slideshow interval</div>
                 <div class="settings-value" id="setting-slideshow-interval-value">5 seconds</div>
@@ -530,6 +535,7 @@
 <script src="js/remote.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/settings.js"></script>
+<script src="js/network-access.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/filetypes.js"></script>
 <script src="js/text-decode.js"></script>
@@ -550,6 +556,8 @@
 <script src="js/viewer.js"></script>
 <script src="js/saved-streams.js"></script>
 <script src="js/favorites.js"></script>
+<script src="js/watch-history.js"></script>
+<script src="js/media-info.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/app.js"></script>
 </body>

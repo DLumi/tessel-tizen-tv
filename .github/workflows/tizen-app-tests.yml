@@ -5,6 +5,8 @@ on:
     paths:
       - 'tizen-app/**'
       - 'tests/tizen-app/**'
+      - 'scripts/**'
+      - 'tests/scripts/**'
       - 'transcode-server/internal/web/static/**'
       - '.github/workflows/tizen-app-tests.yml'
   push:
@@ -12,6 +14,8 @@ on:
     paths:
       - 'tizen-app/**'
       - 'tests/tizen-app/**'
+      - 'scripts/**'
+      - 'tests/scripts/**'
       - 'transcode-server/internal/web/static/**'
       - '.github/workflows/tizen-app-tests.yml'
 
@@ -28,4 +32,4 @@ jobs:
           node-version: '22'
 
       - name: Run subtitle tests
-        run: node --test tests/tizen-app/*.test.js
+        run: node --test tests/tizen-app/*.test.js tests/scripts/*.test.js

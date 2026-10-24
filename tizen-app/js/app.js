@@ -62,45 +62,10 @@
         if (grid) grid.classList.toggle('no-recent', !on);
     }
 
-    /* ── Watched history (localStorage map uri → timestamp) ──────────
-     * Lets the browser mark already-seen episodes so navigating a series
-     * folder shows at a glance which files are done.  An item is marked
-     * watched when playback finishes (oncomplete) or when the user leaves
-     * after watching ≥ 90 % of it. */
-    var WATCHED_KEY = 'vlctv_watched_v1';
-    function getWatched() {
-        try { return JSON.parse(localStorage.getItem(WATCHED_KEY) || '{}'); }
-        catch (e) { return {}; }
-    }
-    function isWatched(uri) {
-        if (!uri) return false;
-        return !!getWatched()[uri];
-    }
-    function markWatched(uri) {
-        if (!uri) return;
-        // A finished file should start from the beginning next time.
-        clearResumePos(uri);
-        var w = getWatched();
-        if (w[uri]) return;
-        w[uri] = Date.now();
-        // Cap growth: drop the oldest entries once we pass 500.
-        var keys = Object.keys(w);
-        if (keys.length > 500) {
-            keys.sort(function (a, b) { return w[a] - w[b]; })
-                .slice(0, keys.length - 500)
-                .forEach(function (k) { delete w[k]; });
-        }
-        try { localStorage.setItem(WATCHED_KEY, JSON.stringify(w)); } catch (e) {}
-    }
-
-    /* ── Resume positions (localStorage map uri → {pos, dur, ts}) ─────
-     * Lets a reopened file continue from where the user left off.  The
-     * position is checkpointed every few seconds while playing (so it
-     * survives a power-off where exitPlayer never runs) and saved on
-     * exit / standby.  It's cleared once the file counts as watched
-     * (oncomplete or ≥ 90 %) so finished files restart from zero. */
-    var RESUME_KEY = 'vlctv_resume_v1';
-    var RESUME_MIN_MS = 30000;   // positions in the first 30 s aren't worth resuming
+    /* ── Watched marks and resume positions: js/watch-history.js ─────
+     * A file is marked watched when playback finishes (oncomplete) or the
+     * user leaves after ≥ 90 % of it; anything short of that keeps its
+     * position so the file can pick up where it left off. */
     /* Aim the resume seek this far BEFORE the saved position.  AVPlay can
      * only land on keyframes and rounds the seek target forward to the
      * next one (~5-6 s GOPs are typical), so an exact-target seek ends up
@@ -116,43 +81,6 @@
 
     // Where the error hints send people for the transcode server.
     var RELEASES_URL = 'github.com/PatrickSt1991/tessel-tizen-tv/releases';
-
-    function getResumeMap() {
-        try { return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}'); }
-        catch (e) { return {}; }
-    }
-    function setResumeMap(m) {
-        try { localStorage.setItem(RESUME_KEY, JSON.stringify(m)); } catch (e) {}
-    }
-    function resumePosFor(uri) {
-        if (!uri) return 0;
-        var r = getResumeMap()[uri];
-        return (r && r.pos > RESUME_MIN_MS) ? r.pos : 0;
-    }
-    function saveResumePos(uri, timeMs, durMs) {
-        if (!uri) return;
-        var m = getResumeMap();
-        if (!timeMs || timeMs < RESUME_MIN_MS) {
-            // Stopped near the start: drop any stale position so the next
-            // open starts clean instead of jumping to an old spot.
-            if (m[uri]) { delete m[uri]; setResumeMap(m); }
-            return;
-        }
-        m[uri] = { pos: Math.floor(timeMs), dur: Math.floor(durMs || 0), ts: Date.now() };
-        // Cap growth: drop the oldest entries once we pass 200.
-        var keys = Object.keys(m);
-        if (keys.length > 200) {
-            keys.sort(function (a, b) { return m[a].ts - m[b].ts; })
-                .slice(0, keys.length - 200)
-                .forEach(function (k) { delete m[k]; });
-        }
-        setResumeMap(m);
-    }
-    function clearResumePos(uri) {
-        if (!uri) return;
-        var m = getResumeMap();
-        if (m[uri]) { delete m[uri]; setResumeMap(m); }
-    }
 
     /* ── State ────────────────────────────────────────────────────── */
     var state = {
@@ -194,6 +122,15 @@
     var lastProgress = { time: 0, duration: 0 };
     // Throttle for the periodic resume-position checkpoint.
     var lastResumeSaveAt = 0;
+    // Set once the current file's duration has been passed to MediaInfo.
+    var durationNoted = false;
+    /* Store the duration AVPlay reports for the browser's length column.
+     * Only USB files are stored, since only they carry a File object. */
+    function noteDuration(ms) {
+        var item = state.playlist[state.playlistIndex];
+        if (!item || !item.file || item.uri !== state.playingUri) return;
+        MediaInfo.put({ uri: item.uri, size: item.file.fileSize, mtime: item.file.modified }, { dur: ms });
+    }
     // Whether the OSD Prev button is currently lit as "Restart".
     var prevRestartLit = false;
 
@@ -304,6 +241,10 @@
         });
         Player.setListener('onprogress', function (p) {
             lastProgress = { time: (p && p.time) || 0, duration: (p && p.duration) || 0 };
+            if (lastProgress.duration && !durationNoted) {
+                durationNoted = true;
+                noteDuration(lastProgress.duration);
+            }
             // A committed scrub seek stays "waiting" until the playhead
             // lands near its target (async AVPlay seeks report the pre-seek
             // position for a while), with a timeout for failed seeks.
@@ -321,10 +262,10 @@
             if (canRestart !== prevRestartLit) { prevRestartLit = canRestart; updateNextPrevButtons(); }
             // Checkpoint the position every 5 s so it survives a power-off
             // or app kill where exitPlayer never gets a chance to run.
-            if (state.playingUri && lastProgress.time >= RESUME_MIN_MS &&
+            if (state.playingUri && lastProgress.time >= WatchHistory.RESUME_MIN_MS &&
                 Date.now() - lastResumeSaveAt > 5000) {
                 lastResumeSaveAt = Date.now();
-                saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
+                WatchHistory.saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
             }
         });
         Player.setListener('oncomplete', function () {
@@ -335,7 +276,7 @@
                 return;
             }
             // A file that played to the end counts as watched.
-            markWatched(state.playingUri);
+            WatchHistory.markWatched(state.playingUri);
             // Auto-play the next sibling if enabled and one exists; repeat-all
             // goes on by definition, wrapping round at the end.
             if ((Settings.get('autoPlay') || Settings.get('repeatMode') === 'all') && playNext(true)) return;
@@ -410,9 +351,9 @@
         switch (action) {
             case 'open-url':           openUrlView(); break;
             case 'browse-usb':         openBrowserAtRoot(); break;
-            case 'browse-smb':         SMB.openBrowser(); break;
-            case 'browse-dlna':        DLNA.openBrowser(); break;
-            case 'browse-webdav':      WebDAV.openBrowser(); break;
+            case 'browse-smb':         if (NetworkAccess.checkFeature(I18n.t('home.smb'), SMB.openBrowser)) SMB.openBrowser(); break;
+            case 'browse-dlna':        if (NetworkAccess.checkFeature(I18n.t('home.dlna'), DLNA.openBrowser)) DLNA.openBrowser(); break;
+            case 'browse-webdav':      if (NetworkAccess.checkFeature(I18n.t('home.webdav'), WebDAV.openBrowser)) WebDAV.openBrowser(); break;
             case 'browse-recent':      openRecent(); break;
             case 'browse-favorites':   openFavorites(); break;
             case 'open-settings':      openSettings(); break;
@@ -453,6 +394,7 @@
             case 'setting-auto-play':     openAutoPlayPicker(); break;
             case 'setting-resume-mode':   openResumeModePicker(); break;
             case 'setting-recent':        openRecentPicker(); break;
+            case 'setting-network':       openNetworkPicker(); break;
             case 'setting-recent-clear':  confirmRecentClear(); break;
             case 'setting-shuffle':       openShufflePicker(); break;
             case 'setting-aspect-mode':   openAspectPicker(); break;
@@ -477,6 +419,7 @@
         UI.showView('view-url'); state.view = 'url';
     }
     function openUrl(url, title) {
+        if (!NetworkAccess.check(url, null, function () { openUrl(url, title); })) return;
         title = title || urlBaseName(url);
         // A channel or song list can't go to AVPlay as it is (issue #110):
         // read it first.  An HLS manifest turns out to be one when read, and
@@ -646,6 +589,7 @@
      * playback fails. Pairing (code + QR) lives in Settings. */
     function fetchRemoteUrl() {
         if (typeof UrlDrop === 'undefined') { UI.toast(I18n.t('url.dropUnavailable')); return; }
+        if (!NetworkAccess.check(UrlDrop.service(), I18n.t('cast.section'), fetchRemoteUrl)) return;
         UI.toast(I18n.t('url.checking'));
         UrlDrop.fetchLatest(function (err, url) {
             if (err) {
@@ -784,26 +728,42 @@
                 };
             }
 
-            var focus = null;
+            // On return from the player or viewer, focus the entry just
+            // shown unless it is finished; otherwise focus the file to
+            // continue with.
+            var hist = WatchHistory.snapshot();
+            if (!focusUri || hist.state(focusUri).finished)
+                focusUri = hist.continueAt(playlist.map(function (p) { return p.uri; })) || focusUri;
+
+            var focus = null, rows = [];   // rows whose duration is still unknown
             entries.forEach(function (e) {
                 var li = document.createElement('li');
                 li.dataset.uri = e.uri || '';
                 li.dataset.dir = e.isDir ? '1' : '0';
-                var watched = e.playable && isWatched(e.uri);
+                var seen = e.playable ? hist.state(e.uri) : null;
+                var watched = !!(seen && seen.watched);
                 if (watched) li.classList.add('watched-item');
+                if (seen && seen.lastTs) li.dataset.seen = '1';   // enables the ◄ hint
+                if (e.isDir || e.playable) { li.dataset.history = '1'; li.dataset.name = e.name; }   // marks rows ◄ can forget
                 if (e.kind === 'other') li.classList.add('unopenable');
-                var watchedBadge = watched ? '<span class="watched" title="' + escapeHtml(I18n.t('browse.watched')) + '">✓</span>' : '';
+                var progress = seen && seen.progress !== null
+                    ? '<span class="progress"><i style="width:' + Math.round(seen.progress * 100) + '%"></i></span>'
+                    : '';
                 var subBadge = (e.subtitles && e.subtitles.length)
                     ? '<span class="meta">CC ×' + e.subtitles.length + '</span>'
                     : '';
+                // Show the cached duration, if any; fillLengths() probes the others.
+                var media = e.playable ? MediaInfo.get(e) : null;
+                var length = media ? media.dur : null;
                 li.innerHTML =
-                    '<span class="icon">' + FileTypes.icon(e.kind) + '</span>' +
-                    '<span class="name">' + escapeHtml(e.name) + '</span>' +
-                    watchedBadge +
+                    watchedIcon(watched, e.kind) +
+                    '<span class="name">' + escapeHtml(e.name) + progress + '</span>' +
                     subBadge +
                     (e.isDir ? '<span class="fav-mark">♥</span>' :
+                        (e.playable ? '<span class="meta length">' + (length ? fmtLength(length) : '') + '</span>' : '') +
                         '<span class="meta">' + Browser.humanSize(e.size) + '</span>');
                 if (e.isDir) markFavoriteRow(li, usbFavorite(e.file, e.name));
+                else if (e.playable && !media) rows.push({ entry: e, li: li });
                 li.addEventListener('click', function () {
                     switch (e.kind) {
                         case 'dir':
@@ -844,7 +804,35 @@
             markNowPlaying();
             UI.refreshFocusables();
             UI.focusOn(focus || ul.firstElementChild);
+            fillLengths(rows);
         });
+    }
+
+    /* Read the durations a folder listing didn't have cached, two files at
+     * a time, and write them into the rows.  Opening another listing
+     * cancels the previous queue. */
+    var lengthsRun = 0;
+    function fillLengths(rows) {
+        var run = ++lengthsRun, queue = rows.slice(), busy = 0, draining = false;
+        function one(row) {
+            busy++;
+            MediaInfo.lookup(row.entry, function (err, media) {
+                busy--;
+                if (run !== lengthsRun) return;
+                if (err && typeof Debug !== 'undefined') Debug.browse('header of ' + row.entry.name + ': ' + (err.message || err));
+                if (media && media.dur) row.li.querySelector('.length').textContent = fmtLength(media.dur);
+                next();
+            });
+        }
+        // Loop rather than recurse: lookup() may call back synchronously
+        // (unparsed containers).
+        function next() {
+            if (draining) return;
+            draining = true;
+            while (busy < 2 && queue.length && run === lengthsRun) one(queue.shift());
+            draining = false;
+        }
+        next();
     }
 
     /* ── Favorites (issue #140) ───────────────────────────────────── */
@@ -903,6 +891,7 @@
     }
     function openFavorite(f) {
         if (typeof Debug !== 'undefined') Debug.action('favorite ' + f.kind + ' ' + f.path);
+        if (f.kind !== 'usb' && !NetworkAccess.checkFeature(f.name, function () { openFavorite(f); })) return;
         if (f.kind === 'smb') {
             // The SMB browser takes over the view and BACK; leaving the
             // folder walks up to the share root and out to Home as usual.
@@ -943,6 +932,34 @@
                 }, function () { next(i + 1); }, 'r');
             } catch (e) { next(i + 1); }
         })(0);
+    }
+    /* Handle ◄ in a USB folder listing.  On a file, forget its watched mark
+     * and resume position.  On a folder, ask for confirmation, then forget
+     * the history of every file below it.  Return false unless the focused
+     * row comes from listInto (data-history). */
+    function forgetWatchedRow() {
+        var li = document.querySelector('#browse-list li.focused');
+        if (!li || !li.dataset.history || !li.dataset.uri || state.view !== 'browse' || !state.browseDir) return false;
+        var dir = state.browseDir, uri = li.dataset.uri, name = li.dataset.name;
+        if (li.dataset.dir === '0') {
+            if (!WatchHistory.forget([uri])) { UI.toast(I18n.t('watched.fileNothing')); return true; }
+            UI.toast(I18n.t('watched.fileForgotten', name));
+            listInto(dir, uri);
+            return true;
+        }
+        var prefix = uri.replace(/\/+$/, '') + '/';
+        var n = WatchHistory.urisUnder(prefix).length;
+        if (!n) { UI.toast(I18n.t('watched.nothing')); return true; }
+        openPicker(I18n.t('watched.forgetConfirm', name, n), [
+            { code: 'keep',   name: I18n.t('watched.keep') },
+            { code: 'forget', name: I18n.t('watched.forget') }
+        ], 'keep', function (val) {
+            if (val !== 'forget') return;
+            WatchHistory.forgetUnder(prefix);
+            UI.toast(I18n.t('watched.forgotten', name));
+            listInto(dir, uri);
+        });
+        return true;
     }
     /* ► on a folder row pins it to Favorites, or takes it off again; on the
      * Favorites list itself ► takes the row away. */
@@ -997,12 +1014,10 @@
         list.forEach(function (item, i) {
             var li = document.createElement('li');
             li.dataset.uri = item.uri;
-            var watched = isWatched(item.uri);
+            var watched = WatchHistory.isWatched(item.uri);
             if (watched) li.classList.add('watched-item');
-            var watchedBadge = watched ? '<span class="watched" title="' + escapeHtml(I18n.t('browse.watched')) + '">✓</span>' : '';
-            li.innerHTML = '<span class="icon">★</span>' +
+            li.innerHTML = watchedIcon(watched, 'recent') +
                            '<span class="name">' + escapeHtml(item.title) + '</span>' +
-                           watchedBadge +
                            '<span class="meta">' + escapeHtml(item.uri) + '</span>';
             li.addEventListener('click', function () {
                 playFromList('recent', playlist, i, null);
@@ -1188,11 +1203,12 @@
         renderPlaylist();
     }
     /* The field only while a playlist is listed; every browse list is drawn
-     * into the same <ul>, which also tells the ► hint when to show. */
+     * into the same <ul>, which also tells the ► and ◄ hints when to show. */
     function watchPlaylistList() {
         var ul = document.getElementById('browse-list');
         var hint = document.getElementById('hint-save');
         var hintFav = document.getElementById('hint-fav');
+        var hintForget = document.getElementById('hint-forget');
         var filter = document.getElementById('playlist-filter-wrap');
         var input = document.getElementById('playlist-filter');
         // Not every keyboard layout reports typing as `input` on every
@@ -1206,6 +1222,8 @@
         new MutationObserver(function () {
             if (hint) hint.classList.toggle('hidden', !ul.querySelector('li[data-channel]'));
             if (hintFav) hintFav.classList.toggle('hidden', !ul.querySelector('li[data-fav]'));
+            // Also show it for folders, since files below them may have history.
+            if (hintForget) hintForget.classList.toggle('hidden', !ul.querySelector('li[data-seen], li[data-history][data-dir="1"]'));
             if (filter) filter.classList.toggle('hidden', !ul.querySelector('li[data-playlist]'));
         }).observe(ul, { childList: true });
     }
@@ -1216,6 +1234,7 @@
     function logoUrl(logo, src) {
         if (!logo) return null;
         var u = /^https?:/i.test(logo) ? logo : src.resolve(logo);
+        if (!NetworkAccess.allows(u)) return null;   // <img> loads bypass the XHR check, so check here
         return u && /^https?:/i.test(u) ? u : null;
     }
     /* A list of thousands of channels mustn't fetch thousands of pictures:
@@ -1326,7 +1345,7 @@
                 Debug.player('visibility=hidden: snapshot pos=' + standbySnapshot.pos + 'ms paused=' + standbySnapshot.paused);
             // Persist the exact position too — if the TV never wakes back
             // into the app, the next launch still resumes from here.
-            saveResumePos(state.playingUri, standbySnapshot.pos, lastProgress.duration);
+            WatchHistory.saveResumePos(state.playingUri, standbySnapshot.pos, lastProgress.duration);
             try { Player.stop(); } catch (e) {}
         } else if (document.visibilityState === 'visible') {
             if (!standbySnapshot) return;
@@ -1347,6 +1366,7 @@
     var openWatchdog = null;
     function playUri(uri, title, opts) {
         opts = opts || {};
+        if (!NetworkAccess.check(uri, title, function () { playUri(uri, title, opts); })) return;
         if (typeof Debug !== 'undefined') Debug.player('playUri uri=' + uri + '  title=' + title);
 
         /* Issue #78: a file opened from a list or the URL screen that has a
@@ -1355,12 +1375,12 @@
          * player state, so BACK / Cancel simply leaves the user where they
          * were.  Next/Prev, auto-play and standby wakes never ask. */
         if (opts.askResume && !opts.resume &&
-            Settings.get('resumeMode') === 'ask' && resumePosFor(uri)) {
+            Settings.get('resumeMode') === 'ask' && WatchHistory.resumePosFor(uri)) {
             var again = {};
             for (var k in opts) again[k] = opts[k];
             again.askResume = false;
             openPicker(title || uri, [
-                { code: 'continue', name: I18n.t('resume.continueFrom', fmtTime(resumePosFor(uri))) },
+                { code: 'continue', name: I18n.t('resume.continueFrom', fmtTime(WatchHistory.resumePosFor(uri))) },
                 { code: 'restart',  name: I18n.t('resume.restart') }
             ], 'continue', function (val) {
                 again.fromStart = (val === 'restart');
@@ -1373,6 +1393,7 @@
         prefsAppliedFor = null;
         lastProgress = { time: 0, duration: 0 };
         lastResumeSaveAt = 0;
+        durationNoted = false;
         prevRestartLit = false;
         resetScrub();          // a scrub/settle from the previous file must
                                // not freeze the new file's progress bar
@@ -1388,10 +1409,10 @@
         } else if (opts.fromStart || Settings.get('resumeMode') === 'never') {
             // Starting over: drop the saved position so the file also opens
             // clean next time (until playback saves a new one).
-            clearResumePos(uri);
+            WatchHistory.clearResumePos(uri);
             pendingResume = null;
         } else {
-            var resumeAt = resumePosFor(uri);
+            var resumeAt = WatchHistory.resumePosFor(uri);
             pendingResume = resumeAt
                 ? { pos: Math.max(0, resumeAt - RESUME_BACKOFF_MS), paused: false, announce: true }
                 : null;
@@ -1737,10 +1758,10 @@
         // Watched ≥ 90 % counts as seen even if the user stops before the end
         // (markWatched also drops the resume position); anything short of
         // that keeps its position so the file can pick up where it left off.
-        if (lastProgress.duration && lastProgress.time / lastProgress.duration >= 0.9)
-            markWatched(state.playingUri);
+        if (lastProgress.duration && lastProgress.time / lastProgress.duration >= WatchHistory.WATCHED_FRACTION)
+            WatchHistory.markWatched(state.playingUri);
         else if (lastProgress.time > 0)   // time===0 → playback never started;
-            saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
+            WatchHistory.saveResumePos(state.playingUri, lastProgress.time, lastProgress.duration);
 
         resetScrub();
         Player.stop();
@@ -2150,6 +2171,19 @@
         document.getElementById('progress-fill').style.width = pct.toFixed(1) + '%';
     }
 
+    /* Format a duration for the browser's length column: "23m", "1h47m". */
+    function fmtLength(ms) {
+        var m = Math.round(ms / 60000), h = Math.floor(m / 60);
+        return (h ? h + 'h' : '') + (m % 60) + 'm';
+    }
+
+    /* Return the row's icon: a check if the file is watched, otherwise the
+     * icon for kind ('recent' gives the Recently Played star). */
+    function watchedIcon(watched, kind) {
+        if (watched) return '<span class="icon" title="' + escapeHtml(I18n.t('browse.watched')) + '">✓</span>';
+        return '<span class="icon">' + (kind === 'recent' ? '★' : FileTypes.icon(kind)) + '</span>';
+    }
+
     function fmtTime(ms) {
         if (typeof ms !== 'number' || isNaN(ms) || ms < 0) return '00:00';
         var s = Math.floor(ms / 1000);
@@ -2179,6 +2213,7 @@
         document.getElementById('setting-aspect-mode-value').textContent   = AspectRatio.nameFor(Settings.get('aspectMode'));
         document.getElementById('setting-browse-filter-value').textContent = browseFilterName(Settings.get('browseFilter'));
         document.getElementById('setting-show-hidden-value').textContent   = I18n.t(Settings.get('showHidden') ? 'common.on' : 'common.off');
+        document.getElementById('setting-network-value').textContent       = networkLevelName(NetworkAccess.level());
         document.getElementById('setting-show-support-value').textContent  = I18n.t(Settings.get('showSupport') ? 'common.on' : 'common.off');
         document.getElementById('support-block').classList.toggle('hidden', !Settings.get('showSupport'));
         document.getElementById('setting-slideshow-interval-value').textContent = slideshowName(Settings.get('slideshowSeconds'));
@@ -2513,6 +2548,40 @@
             UI.toast(I18n.t('toast.setTo', I18n.t('home.recent'), I18n.t(val === 'on' ? 'common.on' : 'common.off')));
         });
     }
+    /* ── Network access (js/network-access.js) ───────────────────── */
+    var NET_LEVELS = [
+        { code: 'all',  nameKey: 'net.all',  optionKey: 'net.allOption' },
+        { code: 'own',  nameKey: 'net.own',  optionKey: 'net.ownOption' },
+        { code: 'none', nameKey: 'net.none', optionKey: 'net.noneOption' }
+    ];
+    function networkLevelName(lvl) {
+        for (var i = 0; i < NET_LEVELS.length; i++) if (NET_LEVELS[i].code === lvl) return I18n.t(NET_LEVELS[i].nameKey);
+        return lvl;
+    }
+    function openNetworkPicker() {
+        pickerSetting = 'networkAccess';
+        openPicker(I18n.t('settings.network'), NET_LEVELS.map(function (l) {
+            return { code: l.code, name: I18n.t(l.optionKey) };
+        }), NetworkAccess.level(), function (val) {
+            Settings.set('networkAccess', val);
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.network'), networkLevelName(val)));
+        });
+    }
+    /* Show the dialog for a blocked action: keep the current level, or raise
+     * it to the level the action needs and retry. */
+    NetworkAccess.setPrompt(function (what, needed, retry) {
+        openPicker(I18n.t('net.needs', what), [
+            { code: 'keep',  name: I18n.t('net.keep') },
+            { code: 'allow', name: I18n.t(needed === 'all' ? 'net.allowAll' : 'net.allowOwn') }
+        ], 'keep', function (val) {
+            if (val !== 'allow') return;
+            Settings.set('networkAccess', needed);
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.network'), networkLevelName(needed)));
+            if (retry) retry();
+        });
+    });
     function confirmRecentClear() {
         if (!getRecent().length) { UI.toast(I18n.t('recent.none')); return; }
         openPicker(I18n.t('recent.clearConfirm'), [
@@ -2965,6 +3034,7 @@
                     return true;
                 }
                 if (caretCanMove(-1)) return false;
+                if (browseShowing() && !pickerOpen && forgetWatchedRow()) return true;
                 UI.moveFocus('left');  return true;
             case K.RIGHT:
                 if (state.view === 'player' && !errorUp && !trackMenuOpen) {
