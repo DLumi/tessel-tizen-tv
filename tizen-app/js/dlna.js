@@ -3,8 +3,9 @@
  * ----------------------------------------------------------------------------
  * The background service finds the servers (SSDP needs UDP, which the page
  * can't send) and reads their folders; see the DLNA block in service.js.
- * Nothing is configured: the home tile searches the LAN, a single server
- * opens straight away, and more are offered as a list.
+ * Nothing is configured: the Servers list (js/servers.js) searches the LAN,
+ * a single server opens straight away, and more are offered as a list.
+ * The servers found stay listed there until the app closes.
  *
  * What a server lists plays from the http URL it gives, straight into
  * AVPlay — so a file opened here flows through the app's normal play path
@@ -77,6 +78,8 @@ var DLNA = (function () {
     var stack = [];          // folders above this one: [{ id, title }]
     var folder = null;       // this folder: { id, title }
     var backHandler = null;
+    var exitTo = null;       // where Back from the top goes: the Servers list, else Home
+    var picked = false;      // opened from the Servers list: no list of our own above it
 
     function list() { return document.getElementById('browse-list'); }
     function head(title, path) {
@@ -98,10 +101,22 @@ var DLNA = (function () {
     }
 
     /* ── searching ─────────────────────────────────────────────────────── */
-    function openBrowser() {
+    /* Search the LAN; Back from what it finds goes to `back` when given. */
+    function openBrowser(back) {
+        exitTo = back || null;
+        picked = false;
         setupBack();
         search();
     }
+    /* A server from an earlier search, picked off the Servers list: Back
+     * from its top folder goes to `back`, not to a list of our own. */
+    function openFound(s, back) {
+        exitTo = back || null;
+        picked = true;
+        setupBack();
+        openServer(s);
+    }
+    function foundServers() { return found.slice(); }
     function search() {
         server = null; folder = null; stack = [];
         head(I18n.t('dlna.title'), I18n.t('dlna.searching'));
@@ -197,7 +212,7 @@ var DLNA = (function () {
         ul.innerHTML = '';
         var playlist = playlistOf(entries), pictures = picturesOf(entries), focus = null;
 
-        if (stack.length || found.length > 1) {
+        if (stack.length || picked || found.length > 1) {
             var up = row('↩', '..');
             up.dataset.dir = '1';
             up.addEventListener('click', goUp);
@@ -238,11 +253,14 @@ var DLNA = (function () {
     function goUp() {
         if (!server) { exit(); return; }
         if (stack.length) { var child = folder; render(stack.pop(), child.title); return; }
-        if (found.length > 1) { showServers(); return; }
+        if (!picked && found.length > 1) { showServers(); return; }
         exit();
     }
     function exit() {
         teardownBack();
+        var back = exitTo;
+        exitTo = null;
+        if (back) { back(); return; }
         if (window.VlcApp && window.VlcApp.home) window.VlcApp.home();
         else UI.showView('view-home');
     }
@@ -259,6 +277,8 @@ var DLNA = (function () {
 
     return {
         openBrowser: openBrowser,
+        openFound:   openFound,
+        found:       foundServers,  // the Servers list shows them too
         detach:      teardownBack,
         kindOf:      kindOf,        // exposed for the Node tests
         playlistOf:  playlistOf     // exposed for the Node tests

@@ -110,17 +110,18 @@ button:focus { outline: none; }
 /* ── Home tiles ───────────────────────────────────────────────────── */
 .home-tiles {
     display: grid; grid-gap: 16px;   /* grid-gap, not gap: TV WebView is Chromium 63 */
-    grid-template-columns: repeat(8, 216px);   /* 8×216 + 7×16 = 1840px, fits 1080p */
+    /* One 280px column per tile shown — six at most: 6×280 + 5×16 = 1760px,
+     * fits 1080p.  A hidden tile (Recently Played off, Servers with network
+     * access off) takes no column, and the rest stay centred. */
+    grid-auto-flow: column; grid-auto-columns: 280px;
     justify-content: center;
 }
-/* Recently Played switched off (issue #142): seven tiles, still centred. */
-.home-tiles.no-recent { grid-template-columns: repeat(7, 216px); }
 
 .tile {
     background: var(--bg-card);
     border: 3px solid var(--border);
     border-radius: var(--r);
-    padding: 56px 10px;   /* eight tiles (WebDAV, #145): 216px leaves ~190px for a label */
+    padding: 64px 16px;   /* six tiles since the Servers tile: 280px leaves ~240px for a label */
     text-align: center;
     transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
     color: var(--fg);
@@ -145,14 +146,13 @@ button:focus { outline: none; }
     margin: 0 auto 28px;
     letter-spacing: 1px;
 }
-.tile-icon.long { font-size: 26px; letter-spacing: 0; }   /* four letters: DLNA */
 .tile:focus .tile-icon, .tile.focused .tile-icon {
     background: var(--accent);
     color: #102035;
 }
 
 .tile-label {
-    font-size: 22px;          /* 26px broke "Netzwerkstream" mid-word in the 216px tile */
+    font-size: 24px;          /* 26px broke "Netzwerkstream" mid-word back when the tile was 216px */
     word-break: break-word;   /* a single long word (ru "Медиасерверы") wraps rather than spills */
     font-weight: 500;
     color: var(--fg);

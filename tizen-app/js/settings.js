@@ -421,7 +421,10 @@ var SubtitleStyle = (function () {
 
 /* The screen the app opens on (issue #149): Home, or one of the Home tiles
  * opened straight away as if it had been pressed.  `action` is the tile's
- * data-action, so the list can't drift from what Home offers. */
+ * data-action, so the list can't drift from what Home offers.  The `old`
+ * ones were tiles until 1.31.0 folded them into Servers: a choice saved
+ * back then still opens the same screen, but the picker no longer offers
+ * them. */
 var StartScreen = (function () {
     var SCREENS = [
         { code: 'home',      name: 'Home screen',         nameKey: 'start.home',     action: '' },
@@ -429,16 +432,17 @@ var StartScreen = (function () {
         { code: 'favorites', name: 'Favorites',           nameKey: 'home.favorites', action: 'browse-favorites' },
         { code: 'url',       name: 'Open Network Stream', nameKey: 'home.url',       action: 'open-url' },
         { code: 'usb',       name: 'Browse USB Drive',    nameKey: 'home.usb',       action: 'browse-usb' },
-        { code: 'smb',       name: 'Browse SMB Share',    nameKey: 'home.smb',       action: 'browse-smb' },
-        { code: 'dlna',      name: 'Media Servers',       nameKey: 'home.dlna',      action: 'browse-dlna' },
-        { code: 'webdav',    name: 'WebDAV',              nameKey: 'home.webdav',    action: 'browse-webdav' }
+        { code: 'servers',   name: 'Servers',             nameKey: 'home.servers',   action: 'browse-servers' },
+        { code: 'smb',       name: 'Browse SMB Share',    nameKey: 'home.smb',       action: 'browse-smb',    old: true },
+        { code: 'dlna',      name: 'Media Servers',       nameKey: 'home.dlna',      action: 'browse-dlna',   old: true },
+        { code: 'webdav',    name: 'WebDAV',              nameKey: 'home.webdav',    action: 'browse-webdav', old: true }
     ];
     function find(code) {
         for (var i = 0; i < SCREENS.length; i++) if (SCREENS[i].code === code) return SCREENS[i];
         return SCREENS[0];
     }
     return {
-        forList: function () { return i18nList(SCREENS); },
+        forList: function () { return i18nList(SCREENS.filter(function (s) { return !s.old; })); },
         find:    find,
         nameFor: function (c) { return i18nName(find(c)); },
         /* The Home tile action to fire at launch, or '' for Home itself. */

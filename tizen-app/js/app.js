@@ -52,14 +52,15 @@
     function clearRecent() {
         try { localStorage.removeItem(RECENT_KEY); } catch (e) {}
     }
-    /* The Home tile follows the setting (issue #142): hidden, the grid
-     * drops to six columns and the cursor starts on Favorites. */
-    function applyRecentTile() {
-        var on   = !!Settings.get('recentHistory');
-        var tile = document.querySelector('.tile[data-action="browse-recent"]');
-        if (tile) tile.classList.toggle('hidden', !on);
-        var grid = document.querySelector('.home-tiles');
-        if (grid) grid.classList.toggle('no-recent', !on);
+    /* The Home tiles that follow a setting: Recently Played (issue #142),
+     * and Servers, which is only a refusal while network access is off.
+     * The grid lays out whichever tiles are left, still centred; with
+     * Recently Played hidden the cursor starts on Favorites. */
+    function applyHomeTiles() {
+        var recent  = document.querySelector('.tile[data-action="browse-recent"]');
+        if (recent) recent.classList.toggle('hidden', !Settings.get('recentHistory'));
+        var servers = document.querySelector('.tile[data-action="browse-servers"]');
+        if (servers) servers.classList.toggle('hidden', NetworkAccess.level() === 'none');
     }
 
     /* ── Watched marks and resume positions: js/watch-history.js ─────
@@ -318,7 +319,7 @@
         // primary route for AVPlay files.
         installMediaSessionHandlers();
 
-        applyRecentTile();           // Recently Played tile on or off (issue #142)
+        applyHomeTiles();            // Recently Played / Servers tiles on or off
         UI.showView('view-home');
         updateRepeatButton();        // reflect saved repeat preference on OSD
         updateShuffleButton();       // reflect saved shuffle preference on OSD
@@ -341,6 +342,7 @@
         var action = StartScreen.actionFor(code);
         if (!action) return;
         if (code === 'recent' && !Settings.get('recentHistory')) return;
+        if (code === 'servers' && NetworkAccess.level() === 'none') return;
         if (typeof Debug !== 'undefined') Debug.view('start screen: ' + code);
         handleAction(action);
     }
@@ -351,6 +353,9 @@
         switch (action) {
             case 'open-url':           openUrlView(); break;
             case 'browse-usb':         openBrowserAtRoot(); break;
+            case 'browse-servers':     if (NetworkAccess.checkFeature(I18n.t('home.servers'), Servers.openBrowser)) Servers.openBrowser(); break;
+            // No longer tiles — the Servers tile covers all three — but a
+            // start screen chosen before 1.31.0 still names one of them.
             case 'browse-smb':         if (NetworkAccess.checkFeature(I18n.t('home.smb'), SMB.openBrowser)) SMB.openBrowser(); break;
             case 'browse-dlna':        if (NetworkAccess.checkFeature(I18n.t('home.dlna'), DLNA.openBrowser)) DLNA.openBrowser(); break;
             case 'browse-webdav':      if (NetworkAccess.checkFeature(I18n.t('home.webdav'), WebDAV.openBrowser)) WebDAV.openBrowser(); break;
@@ -2543,7 +2548,7 @@
             { code: 'off', name: I18n.t('recent.offOption') }
         ], cur, function (val) {
             Settings.set('recentHistory', val === 'on');
-            applyRecentTile();
+            applyHomeTiles();
             refreshSettingsValues();
             UI.toast(I18n.t('toast.setTo', I18n.t('home.recent'), I18n.t(val === 'on' ? 'common.on' : 'common.off')));
         });
@@ -2564,6 +2569,7 @@
             return { code: l.code, name: I18n.t(l.optionKey) };
         }), NetworkAccess.level(), function (val) {
             Settings.set('networkAccess', val);
+            applyHomeTiles();
             refreshSettingsValues();
             UI.toast(I18n.t('toast.setTo', I18n.t('settings.network'), networkLevelName(val)));
         });
@@ -2577,6 +2583,7 @@
         ], 'keep', function (val) {
             if (val !== 'allow') return;
             Settings.set('networkAccess', needed);
+            applyHomeTiles();
             refreshSettingsValues();
             UI.toast(I18n.t('toast.setTo', I18n.t('settings.network'), networkLevelName(needed)));
             if (retry) retry();

@@ -329,14 +329,20 @@ var WebDAV = (function () {
     function goUp() {
         if (pickingServer) { exit(); return; }
         if (!pathStack.length) {
-            if (servers().length > 1) { showServers(); return; }
+            if (!exitTo && servers().length > 1) { showServers(); return; }
             exit();
             return;
         }
         render(pathStack.pop());
     }
+    /* Where Back from the root goes: the Servers list that opened it
+     * (js/servers.js), else Home. */
+    var exitTo = null;
     function exit() {
         teardownBack();
+        var back = exitTo;
+        exitTo = null;
+        if (back) { back(); return; }
         if (window.VlcApp && window.VlcApp.home) window.VlcApp.home();
         else UI.showView('view-home');
     }
@@ -351,9 +357,11 @@ var WebDAV = (function () {
         if (backHandler) { Remote.pop(backHandler); backHandler = null; }
     }
 
-    /* Entry point from the home tile: straight into the server when there
-     * is one, a list to pick from when there are more. */
+    /* Straight into the server when there is one, a list to pick from when
+     * there are more.  Home offers the Servers list instead (js/servers.js);
+     * this is what a start screen of "WebDAV" still opens. */
     function openBrowser() {
+        exitTo = null;
         var l = servers();
         if (!l.length) {
             dbg('openBrowser: no server saved → sending to Settings');
@@ -410,10 +418,13 @@ var WebDAV = (function () {
             });
         });
     }
-    /* A pinned folder from the Favorites tile: straight into `path` on
-     * saved server `srv`.  false when that server is no longer saved. */
-    function openFolder(srv, path) {
+    /* A pinned folder from the Favorites tile, or a server from the Servers
+     * list: straight into `path` on saved server `srv`, and Back from the
+     * root goes to `back` when given.  false when that server is no longer
+     * saved. */
+    function openFolder(srv, path, back) {
         if (!serverById(srv)) return false;
+        exitTo = back || null;
         setupBack();
         openServer(srv, path);
         return true;
