@@ -727,6 +727,8 @@
                 var seen = e.playable ? hist.state(e.uri) : null;
                 var watched = !!(seen && seen.watched);
                 if (watched) li.classList.add('watched-item');
+                if (seen && seen.lastTs) li.dataset.seen = '1';   // enables the ◄ hint
+                if (e.isDir || e.playable) { li.dataset.history = '1'; li.dataset.name = e.name; }   // marks rows ◄ can forget
                 if (e.kind === 'other') li.classList.add('unopenable');
                 var progress = seen && seen.progress !== null
                     ? '<span class="progress"><i style="width:' + Math.round(seen.progress * 100) + '%"></i></span>'
@@ -880,6 +882,34 @@
                 }, function () { next(i + 1); }, 'r');
             } catch (e) { next(i + 1); }
         })(0);
+    }
+    /* Handle ◄ in a USB folder listing.  On a file, forget its watched mark
+     * and resume position.  On a folder, ask for confirmation, then forget
+     * the history of every file below it.  Return false unless the focused
+     * row comes from listInto (data-history). */
+    function forgetWatchedRow() {
+        var li = document.querySelector('#browse-list li.focused');
+        if (!li || !li.dataset.history || !li.dataset.uri || state.view !== 'browse' || !state.browseDir) return false;
+        var dir = state.browseDir, uri = li.dataset.uri, name = li.dataset.name;
+        if (li.dataset.dir === '0') {
+            if (!WatchHistory.forget([uri])) { UI.toast(I18n.t('watched.fileNothing')); return true; }
+            UI.toast(I18n.t('watched.fileForgotten', name));
+            listInto(dir, uri);
+            return true;
+        }
+        var prefix = uri.replace(/\/+$/, '') + '/';
+        var n = WatchHistory.urisUnder(prefix).length;
+        if (!n) { UI.toast(I18n.t('watched.nothing')); return true; }
+        openPicker(I18n.t('watched.forgetConfirm', name, n), [
+            { code: 'keep',   name: I18n.t('watched.keep') },
+            { code: 'forget', name: I18n.t('watched.forget') }
+        ], 'keep', function (val) {
+            if (val !== 'forget') return;
+            WatchHistory.forgetUnder(prefix);
+            UI.toast(I18n.t('watched.forgotten', name));
+            listInto(dir, uri);
+        });
+        return true;
     }
     /* ► on a folder row pins it to Favorites, or takes it off again; on the
      * Favorites list itself ► takes the row away. */
@@ -1123,11 +1153,12 @@
         renderPlaylist();
     }
     /* The field only while a playlist is listed; every browse list is drawn
-     * into the same <ul>, which also tells the ► hint when to show. */
+     * into the same <ul>, which also tells the ► and ◄ hints when to show. */
     function watchPlaylistList() {
         var ul = document.getElementById('browse-list');
         var hint = document.getElementById('hint-save');
         var hintFav = document.getElementById('hint-fav');
+        var hintForget = document.getElementById('hint-forget');
         var filter = document.getElementById('playlist-filter-wrap');
         var input = document.getElementById('playlist-filter');
         // Not every keyboard layout reports typing as `input` on every
@@ -1141,6 +1172,8 @@
         new MutationObserver(function () {
             if (hint) hint.classList.toggle('hidden', !ul.querySelector('li[data-channel]'));
             if (hintFav) hintFav.classList.toggle('hidden', !ul.querySelector('li[data-fav]'));
+            // Also show it for folders, since files below them may have history.
+            if (hintForget) hintForget.classList.toggle('hidden', !ul.querySelector('li[data-seen], li[data-history][data-dir="1"]'));
             if (filter) filter.classList.toggle('hidden', !ul.querySelector('li[data-playlist]'));
         }).observe(ul, { childList: true });
     }
@@ -2907,6 +2940,7 @@
                     return true;
                 }
                 if (caretCanMove(-1)) return false;
+                if (browseShowing() && !pickerOpen && forgetWatchedRow()) return true;
                 UI.moveFocus('left');  return true;
             case K.RIGHT:
                 if (state.view === 'player' && !errorUp && !trackMenuOpen) {

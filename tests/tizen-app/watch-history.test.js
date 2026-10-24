@@ -66,6 +66,39 @@ test('unreadable storage reads as empty history', function () {
     assert.strictEqual(WatchHistory.create(null).isWatched('a'), false);
 });
 
+test('forget() drops marks and positions for the files named, and says how many had one', function () {
+    var h = history();
+    h.markWatched('e1'); h.markWatched('e2');
+    h.saveResumePos('e3', 10 * MIN, 40 * MIN);
+    h.markWatched('other');
+    assert.strictEqual(h.forget(['e1', 'e2', 'e3', 'e4', '']), 3);
+    assert.deepStrictEqual(Object.keys(h.storage.json(h.WATCHED_KEY)), ['other']);
+    assert.deepStrictEqual(h.storage.json(h.RESUME_KEY), {});
+    assert.strictEqual(h.forget(['e1']), 0);
+    assert.strictEqual(h.snapshot().continueAt(['e1', 'e2', 'e3']), null);
+});
+
+test('forgetUnder() drops everything below a folder, subfolders included, and nothing else', function () {
+    var h = history();
+    var root = 'file:///media/usb/Show/';
+    h.markWatched(root + 'Episode 1.mkv');                              // watched only
+    h.saveResumePos(root + 'Episode 2.mkv', 10 * MIN, 40 * MIN);        // resume only
+    h.markWatched(root + 'Season 2/Episode 1.mkv');
+    h.saveResumePos(root + 'Season 2/Episode 1.mkv', 5 * MIN, 40 * MIN);   // both, counted once
+    h.markWatched('file:///media/usb/Show-2/Episode 1.mkv');            // sibling with a similar name
+    h.saveResumePos('file:///media/usb/Show-2/Episode 2.mkv', 10 * MIN, 40 * MIN);
+    h.markWatched('file:///media/usb/Show.mkv');
+    assert.deepStrictEqual(h.urisUnder(root).sort(),
+        [root + 'Episode 1.mkv', root + 'Episode 2.mkv', root + 'Season 2/Episode 1.mkv']);
+    assert.strictEqual(h.forgetUnder(root), 3);
+    assert.deepStrictEqual(Object.keys(h.storage.json(h.WATCHED_KEY)).sort(),
+        ['file:///media/usb/Show-2/Episode 1.mkv', 'file:///media/usb/Show.mkv']);
+    assert.deepStrictEqual(Object.keys(h.storage.json(h.RESUME_KEY)), ['file:///media/usb/Show-2/Episode 2.mkv']);
+    assert.strictEqual(h.forgetUnder(root), 0);
+    assert.strictEqual(h.forgetUnder(''), 0);
+    assert.strictEqual(Object.keys(h.storage.json(h.WATCHED_KEY)).length, 2);
+});
+
 test('a snapshot tells watched, progress and finished apart', function () {
     var h = history();
     h.markWatched('done');

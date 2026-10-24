@@ -73,6 +73,36 @@ var WatchHistory = (function () {
             var m = read(RESUME_KEY);
             if (m[uri]) { delete m[uri]; write(RESUME_KEY, m); }
         }
+        /* Remove the watched marks and resume positions of uris.  Return the
+         * number of files that had either. */
+        function forget(uris) {
+            var w = read(WATCHED_KEY), r = read(RESUME_KEY), n = 0;
+            for (var i = 0; i < uris.length; i++) {
+                var u = uris[i];
+                if (!w[u] && !r[u]) continue;
+                n++;
+                delete w[u]; delete r[u];
+            }
+            if (n) { write(WATCHED_KEY, w); write(RESUME_KEY, r); }
+            return n;
+        }
+        /* Return the stored uris starting with prefix (a folder's uri plus
+         * "/"): files with history in that folder or its subfolders. */
+        function urisUnder(prefix) {
+            var w = read(WATCHED_KEY), r = read(RESUME_KEY), seen = {}, out = [];
+            [w, r].forEach(function (m) {
+                Object.keys(m).forEach(function (u) {
+                    if (u.indexOf(prefix) !== 0 || seen[u]) return;
+                    seen[u] = true; out.push(u);
+                });
+            });
+            return out;
+        }
+        /* Forget every uri under prefix.  Return the number of files
+         * removed. */
+        function forgetUnder(prefix) {
+            return prefix ? forget(urisUnder(prefix)) : 0;
+        }
 
         /* Read both maps once and answer from that copy while a folder is
          * drawn. */
@@ -119,7 +149,7 @@ var WatchHistory = (function () {
             RESUME_MIN_MS: RESUME_MIN_MS, WATCHED_FRACTION: WATCHED_FRACTION,
             isWatched: isWatched, markWatched: markWatched,
             resumePosFor: resumePosFor, saveResumePos: saveResumePos, clearResumePos: clearResumePos,
-            snapshot: snapshot
+            forget: forget, urisUnder: urisUnder, forgetUnder: forgetUnder, snapshot: snapshot
         };
     }
 
