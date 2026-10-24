@@ -39,6 +39,7 @@ Works on Tizen TVs from 2017 onward. SMB shares, DLNA and WebDAV servers need Ti
 - [Playback notes](docs/PLAYBACK-NOTES.md) — files the TV can't decode, 5.1 that comes out as stereo, and what to do about it
 - [Transcode server](transcode-server/README.md) — Docker or native binaries, pairing, surround, hardware acceleration
 - [Cast from another device](docs/SEND-URL-FROM-DEVICE.md) — how the phone-to-TV link works and how to host your own page
+- [Files onto the USB stick from your PC](docs/REMOTE.md) — `scripts/tessel-remote`: list the stick, push videos into a folder, no setup
 - [Reading the app's log](docs/DEBUG-LOG.md) — DevTools via Apps2Samsung, SMB trail, remote log capture
 - [Why a web app and not native](docs/WHY-WEB-APP.md)
 

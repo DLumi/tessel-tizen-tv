@@ -1,0 +1,526 @@
+#!/usr/bin/env node
+/* ============================================================================
+ * tessel-remote — manages the USB stick in the TV from your PC.
+ * ----------------------------------------------------------------------------
+ *   scripts/tessel-remote tvs                       Samsung TVs on this LAN
+ *   scripts/tessel-remote drives                    USB drives in the TV
+ *   scripts/tessel-remote ls [-a] [[A/]folder]      like `ls -lh`
+ *   scripts/tessel-remote push [-d A] <folder> <file>...
+ *   scripts/tessel-remote rm [-r] <path>...          folders only with -r
+ *   scripts/tessel-remote mv <from> <to>            rename, or move into a folder
+ *
+ * No configuration needed.  The TV is found via SSDP (use --tv <ip> or
+ * TESSEL_TV if there are several) and remembered in
+ * ~/.cache/tessel-remote.json.
+ *
+ * How it works: the TV accepts no incoming file transfers (no ssh, ftp or
+ * SMB, and sdb can't write to the stick), but Tessel can download files.
+ * The script serves the files over HTTP and asks the running app, through
+ * its DevTools socket, to download each one onto the stick (~12 MB/s on a
+ * 2018 set).
+ * For that socket the app has to be launched in debug mode once, which needs
+ * the TV in Developer Mode (Apps → 1 2 3 4 5 → on, with this PC's IP) and the
+ * `sdb` tool from Tizen Studio (--sdb <path> or SDB=… if it isn't on PATH).
+ * The debug launch restarts the app; after that it stays usable as long as
+ * the app runs, and this script finds it again without another restart.
+ *
+ * Drive selection: -d or an `A/` prefix if given; otherwise the only
+ * drive; otherwise the drive whose root already has the folder's first
+ * component.  If none applies, the script stops and prints `drives`.
+ * `push` creates the folder if missing and skips files already there with
+ * the same size.  `rm` and `mv` fail closed: every path is checked first
+ * and nothing is touched unless all of them are fine; `mv` never
+ * overwrites and stays on one drive.
+ *
+ * Node 22 or later (fetch and WebSocket built in).
+ * ==========================================================================*/
+'use strict';
+
+const APP_ID = 'madebypatk.vlcweb';
+
+const { createServer } = require('node:http');
+const { createReadStream, readFileSync, writeFileSync, mkdirSync, existsSync } = require('node:fs');
+const { stat } = require('node:fs/promises');
+const { basename, resolve, join } = require('node:path');
+const { networkInterfaces, homedir } = require('node:os');
+const { spawn } = require('node:child_process');
+const { connect } = require('node:net');
+const dgram = require('node:dgram');
+
+/* ── pure bits (exported for the tests) ─────────────────────────────────── */
+
+/* Format a size like `ls -lh`: 291, 7.9K, 739M, 1.2G. */
+function lsSize(n) {
+    const u = ['', 'K', 'M', 'G', 'T']; let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i && n < 10 ? n.toFixed(1) : Math.round(n)) + u[i];
+}
+const gb = n => (n / 1e9).toFixed(n < 1e10 ? 1 : 0) + ' GB';
+const mb = n => (n / 1048576).toFixed(0) + ' MB';
+
+/* Format a date like `ls -l`: the time if within six months, otherwise the year. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function lsDate(ms, now) {
+    if (!ms) return '            ';
+    now = now || Date.now();
+    const d = new Date(ms), recent = Math.abs(now - ms) < 182 * 86400e3;
+    const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    return `${MON[d.getMonth()]} ${String(d.getDate()).padStart(2)} ${recent ? hm : ' ' + d.getFullYear()}`;
+}
+
+/* Resolve spec ("A/x/y", "x/y" or "") to a drive and a path on it.
+ * drives: [{letter, root, top: ['shows/', …]}].  Returns {drive, rel} or
+ * {error}. */
+function pickDrive(drives, spec, forced) {
+    let rel = String(spec || '').replace(/^\.?\/*|\/+$/g, '').replace(/\/{2,}/g, '/');
+    if (rel.split('/').some(c => c === '..' || c === '.')) return { error: `refusing a path with . or .. in it: ${spec}` };
+    let letter = null;
+    const m = /^([A-Z])(\/|$)/.exec(rel);
+    if (m && drives.some(d => d.letter === m[1]) && !drives.every(d => d.top.includes(m[1] + '/'))) {
+        letter = m[1]; rel = rel.slice(2);
+    }
+    if (forced) letter = String(forced).toUpperCase();
+    if (!letter) {
+        if (drives.length === 1) letter = drives[0].letter;
+        else if (drives.length) {
+            const first = rel.split('/')[0];
+            const has = drives.filter(d => first && d.top.includes(first + '/'));
+            if (has.length === 1) letter = has[0].letter;
+        }
+    }
+    const drive = drives.find(d => d.letter === letter);
+    if (drive) return { drive, rel };
+    return { showDrives: true,
+             error: !drives.length ? 'no USB drive mounted in the TV'
+                  : letter ? `no USB drive ${letter} in the TV:`
+                  : `${drives.length} USB drives in the TV, say which with -d or a drive prefix (A/${rel}):` };
+}
+
+/* Parse argv into {cmd, args, opts}.  Flags: -a, -d X, --tv X, --sdb X. */
+function parseArgs(argv) {
+    const opts = { all: false, recursive: false, drive: null, tv: null, sdb: null }, args = [];
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === '-a') opts.all = true;
+        else if (a === '-r') opts.recursive = true;
+        else if (a === '-d') opts.drive = argv[++i];
+        else if (a === '--tv') opts.tv = argv[++i];
+        else if (a === '--sdb') opts.sdb = argv[++i];
+        else if (/^--tv=/.test(a)) opts.tv = a.slice(5);
+        else if (/^--sdb=/.test(a)) opts.sdb = a.slice(6);
+        else args.push(a);
+    }
+    return { cmd: args.shift() || '', args, opts };
+}
+
+/* Compute where `mv src dst` puts src ({rel, isDir}), given dst ({rel,
+ * exists, isDir}): inside dst if dst is an existing folder, otherwise at
+ * dst (a rename).  {to} or {error}.  Never overwrites, never moves a folder
+ * into itself. */
+function movePlan(src, dst) {
+    const base = src.rel.split('/').pop();
+    if (!src.rel) return { error: 'refusing to move a drive root' };
+    if (!dst.rel && !(dst.exists && dst.isDir)) return { error: 'refusing to rename to a drive root' };
+    let to;
+    if (dst.exists && dst.isDir) to = (dst.rel ? dst.rel + '/' : '') + base;
+    else if (dst.exists) return { error: `${dst.rel} exists, not overwriting` };
+    else to = dst.rel;
+    if (to === src.rel) return { error: `${src.rel} and ${to} are the same` };
+    if (src.isDir && (to + '/').indexOf(src.rel + '/') === 0) return { error: `cannot move ${src.rel}/ into itself` };
+    return { to };
+}
+
+module.exports = { lsSize, lsDate, pickDrive, parseArgs, movePlan };
+if (require.main !== module) return;
+
+/* ── settings that persist between runs ─────────────────────────────────── */
+
+const CACHE = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'tessel-remote.json');
+function cacheRead() { try { return JSON.parse(readFileSync(CACHE, 'utf8')); } catch (e) { return {}; } }
+function cacheWrite(c) { try { mkdirSync(join(CACHE, '..'), { recursive: true }); writeFileSync(CACHE, JSON.stringify(c)); } catch (e) {} }
+
+const USAGE = `usage: tessel-remote tvs | drives | ls [-a] [[A/]folder] | push [-d A] <folder> <file>...
+                     | rm [-r] <path>... | mv <from> <to>
+       --tv <ip>  (or TESSEL_TV)   --sdb <path to sdb>  (or SDB)`;
+function die(msg, code) { console.error(msg); process.exit(code === undefined ? 1 : code); }
+
+/* ── finding the TV ─────────────────────────────────────────────────────── */
+
+/* Fetch the device info a Samsung TV serves on port 8001; null if there is none. */
+async function tvInfo(ip) {
+    try {
+        const r = await fetch(`http://${ip}:8001/api/v2/`, { signal: AbortSignal.timeout(2500) });
+        const j = await r.json();
+        if (!j.device || !/Samsung/i.test(j.device.type || '')) return null;
+        return { ip, name: j.device.name, model: j.device.modelName, devMode: j.device.developerMode === '1',
+                 devIP: j.device.developerIP || '' };
+    } catch (e) { return null; }
+}
+/* Discover devices via SSDP and return the Samsung TVs among them. */
+function ssdpHosts(ms) {
+    return new Promise(done => {
+        const s = dgram.createSocket('udp4'), seen = new Set();
+        const msg = Buffer.from('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 1\r\nST: ssdp:all\r\n\r\n');
+        s.on('message', (m, r) => seen.add(r.address));
+        s.on('error', () => {});
+        s.bind(() => { try { s.setBroadcast(true); s.send(msg, 1900, '239.255.255.250'); } catch (e) {} });
+        setTimeout(() => { try { s.close(); } catch (e) {} done([...seen]); }, ms);
+    });
+}
+async function findTVs() {
+    const hosts = await ssdpHosts(2000);
+    return (await Promise.all(hosts.map(tvInfo))).filter(Boolean);
+}
+/* Pick the TV: --tv or TESSEL_TV if set; otherwise the remembered TV if it
+ * still responds; otherwise the only TV SSDP finds. */
+async function chooseTV(opts, cache) {
+    const want = opts.tv || process.env.TESSEL_TV;
+    if (want) {
+        const tv = await tvInfo(want);
+        if (!tv) die(`${want} does not answer like a Samsung TV (port 8001)`);
+        return tv;
+    }
+    if (cache.tv) { const tv = await tvInfo(cache.tv); if (tv) return tv; }
+    const tvs = await findTVs();
+    if (tvs.length === 1) return tvs[0];
+    if (!tvs.length) die('no Samsung TV found on this LAN (is it on? same network?); try --tv <ip>');
+    die('several TVs found, pick one with --tv <ip>:\n' + tvs.map(t => `  ${t.ip}  ${t.name}  ${t.model}`).join('\n'));
+}
+
+/* ── finding the app's DevTools socket ──────────────────────────────────── */
+
+const myIPs = () => Object.values(networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal).map(i => i.address);
+async function devtoolsPage(ip, port) {
+    try {
+        const pages = await (await fetch(`http://${ip}:${port}/json`, { signal: AbortSignal.timeout(2000) })).json();
+        return pages.find(p => p.type === 'page' && /Tessel|VLC/i.test(p.title || '')) || pages.find(p => p.type === 'page') || null;
+    } catch (e) { return null; }
+}
+/* Find the DevTools port of an app already in debug mode by scanning the
+ * TV's ephemeral ports. */
+function scanPorts(ip) {
+    return new Promise(done => {
+        const open = []; let next = 30000, active = 0;
+        const spawnOne = () => {
+            while (active < 500 && next < 65536) {
+                const p = next++; active++;
+                const s = connect({ host: ip, port: p });
+                s.setTimeout(1500);
+                s.on('connect', () => { open.push(p); s.destroy(); });
+                s.on('timeout', () => s.destroy());
+                s.on('error', () => {});
+                s.on('close', () => { active--; next < 65536 ? spawnOne() : active === 0 && done(open.sort((a, b) => b - a)); });
+            }
+        };
+        spawnOne();
+    });
+}
+async function findPort(ip) {
+    for (const p of await scanPorts(ip)) if (await devtoolsPage(ip, p)) return p;
+    return null;
+}
+function findSdb(opts) {
+    const c = [opts.sdb, process.env.SDB, 'sdb',
+               join(homedir(), 'tizen-studio/tools/sdb'), join(homedir(), 'TizenStudio/tools/sdb'),
+               '/opt/tizen-studio/tools/sdb', 'C:\\tizen-studio\\tools\\sdb.exe',
+               join(homedir(), 'AppData/Local/Apps2Samsung/sdb.exe'),
+               join(homedir(), 'Library/Application Support/Apps2Samsung/sdb')].filter(Boolean);
+    for (const p of c) {
+        if (p === 'sdb') { if (process.env.PATH.split(require('node:path').delimiter).some(d => existsSync(join(d, 'sdb')) || existsSync(join(d, 'sdb.exe')))) return 'sdb'; }
+        else if (existsSync(p)) return p;
+    }
+    return null;
+}
+function run(cmd, args, ms) {
+    return new Promise(done => {
+        let out = '';
+        const ch = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        ch.stdout.on('data', d => { out += d; });
+        ch.stderr.on('data', d => { out += d; });
+        const t = setTimeout(() => ch.kill(), ms);
+        ch.on('close', () => { clearTimeout(t); done(out); });
+        ch.on('error', e => { clearTimeout(t); done(out + e.message); });
+    });
+}
+/* Launch the app in debug mode over sdb and return the port it prints, or
+ * null. */
+async function debugLaunch(tv, opts) {
+    const sdb = findSdb(opts);
+    if (!sdb) die(`Tessel is not in debug mode on ${tv.name} and sdb was not found.\n` +
+                  `Install Tizen Studio (or point --sdb / SDB at its tools/sdb), put the TV in Developer Mode\n` +
+                  `(Apps → 1 2 3 4 5 → Developer Mode on → this PC's IP), and run again.`);
+    if (!tv.devMode) die(`${tv.name} is not in Developer Mode (Apps → 1 2 3 4 5 → on → this PC's IP), so sdb can't reach it.`);
+    if (tv.devIP && !myIPs().includes(tv.devIP))
+        console.error(`note: the TV's Developer Mode is set to ${tv.devIP}, this PC is ${myIPs().join('/')}`);
+    const c = await run(sdb, ['connect', tv.ip], 15000);
+    if (!/connected/i.test(c)) die(`sdb connect ${tv.ip}: ${c.trim() || 'no answer'}`);
+    process.stderr.write(`launching Tessel in debug mode on ${tv.name} (this restarts the app) … `);
+    const out = await run(sdb, ['-s', tv.ip + ':26101', 'shell', '0', 'debug', APP_ID], 30000);
+    const m = /port:\s*(\d+)/.exec(out);
+    if (m) { console.error('ok'); return +m[1]; }
+    // sdb sometimes hangs without printing the port although the app is up.
+    console.error('no port printed, looking for it');
+    const p = await findPort(tv.ip);
+    if (!p) die(`could not launch Tessel in debug mode:\n${out.trim()}`);
+    return p;
+}
+
+/* A DevTools session with evaluate(). */
+async function connectApp(tv, opts, cache) {
+    let port = cache.port && cache.tv === tv.ip ? cache.port : null;
+    if (port && !(await devtoolsPage(tv.ip, port))) port = null;
+    if (!port) port = await findPort(tv.ip);
+    if (!port) port = await debugLaunch(tv, opts);
+    let page = await devtoolsPage(tv.ip, port);
+    for (let i = 0; !page && i < 10; i++) { await new Promise(r => setTimeout(r, 1000)); page = await devtoolsPage(tv.ip, port); }
+    if (!page) die('Tessel started but its page never showed up on the debug port');
+    cacheWrite({ ...cache, tv: tv.ip, port });
+
+    const ws = new WebSocket(page.webSocketDebuggerUrl);
+    let id = 0; const pending = new Map();
+    const call = (method, params) => new Promise(r => { pending.set(++id, r); ws.send(JSON.stringify({ id, method, params: params || {} })); });
+    ws.onmessage = e => { const m = JSON.parse(e.data); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
+    await new Promise((r, j) => { ws.onopen = r; ws.onerror = () => j(new Error('websocket')); }).catch(() => die('could not open the DevTools socket on port ' + port));
+    /* Evaluate `expr` (may be a promise) in the page; throws on exception. */
+    async function evaluate(expr) {
+        const r = await call('Runtime.evaluate', {
+            expression: `Promise.resolve().then(function () { return (${expr}); }).then(null, function (e) { throw String(e && e.stack || e); })`,
+            returnByValue: true, awaitPromise: true });
+        if (r.error) throw new Error('DevTools: ' + r.error.message);
+        const d = r.result.exceptionDetails;
+        if (d) throw new Error('TV: ' + ((d.exception && (d.exception.value || d.exception.description)) || d.text));
+        return r.result.result.value;
+    }
+    // The app may still be loading right after a launch.
+    for (let i = 0; i < 20 && (await evaluate('typeof tizen'))[0] !== 'o'; i++) await new Promise(r => setTimeout(r, 500));
+    return { evaluate, close: () => ws.close() };
+}
+
+/* ── the stick, through the app ─────────────────────────────────────────── */
+
+const js = JSON.stringify;
+const listDir = (app, path) => app.evaluate(`new Promise(function (res, rej) {
+    tizen.filesystem.resolve(${js(path)}, function (d) {
+        if (!d.isDirectory) { rej(new Error('not a folder: ' + ${js(path)})); return; }
+        d.listFiles(function (fs) {
+            res(fs.map(function (f) { return { name: f.name, dir: !!f.isDirectory, size: f.fileSize || 0, ro: !!f.readOnly,
+                                               mtime: f.modified ? f.modified.getTime() : 0 }; }));
+        }, rej);
+    }, rej, 'r'); })`);
+/* List mounted removable storages, lettered A, B, … in the TV's order.
+ * Capacity and free space come from systeminfo, matched by position
+ * because the two APIs share no id. */
+async function loadDrives(app) {
+    const drives = await app.evaluate(`new Promise(function (res, rej) {
+        tizen.filesystem.listStorages(function (st) {
+            var usb = st.filter(function (s) { return s.type === 'EXTERNAL' && s.state === 'MOUNTED'; });
+            var out = [], n = 0;
+            if (!usb.length) { res(out); return; }
+            tizen.systeminfo.getPropertyValue('STORAGE', function (si) {
+                var units = si.units.filter(function (u) { return u.isRemovable; });
+                usb.forEach(function (s, i) {
+                    tizen.filesystem.resolve(s.label, function (d) {
+                        out[i] = { label: s.label, root: d.fullPath,
+                                   cap: units[i] ? units[i].capacity : 0, free: units[i] ? units[i].availableCapacity : 0 };
+                        if (++n === usb.length) res(out);
+                    }, rej, 'rw');
+                });
+            }, rej);
+        }, rej); })`);
+    for (const [i, d] of drives.entries()) {
+        d.letter = String.fromCharCode(65 + i);
+        d.top = (await listDir(app, d.root)).filter(e => !/^(\.|\$RECYCLE|System Volume Information)/.test(e.name)).map(e => e.name + (e.dir ? '/' : '')).sort();
+    }
+    return drives;
+}
+function showDrives(drives) {
+    if (!drives.length) { console.log('no USB drive mounted in the TV'); return; }
+    const w = Math.max(...drives.map(d => d.label.length), 5), wp = Math.max(...drives.map(d => d.root.length), 4);
+    console.log(`  DRIVE  ${'LABEL'.padEnd(w)}  ${'PATH'.padEnd(wp)}  ${'SIZE'.padStart(7)}  ${'FREE'.padStart(7)}`);
+    for (const d of drives)
+        console.log(`  ${d.letter}      ${d.label.padEnd(w)}  ${d.root.padEnd(wp)}  ${gb(d.cap).padStart(7)}  ${gb(d.free).padStart(7)}`);
+}
+function target(drives, spec, opts) {
+    const t = pickDrive(drives, spec, opts.drive);
+    if (t.error) { console.error(t.error); if (t.showDrives) showDrives(drives); process.exit(1); }
+    t.path = t.rel ? t.drive.root + '/' + t.rel : t.drive.root;
+    return t;
+}
+
+async function cmdLs(app, args, opts) {
+    const drives = await loadDrives(app);
+    const t = target(drives, args[0], opts);
+    let entries;
+    try { entries = await listDir(app, t.path); }
+    catch (e) { die(/NotFoundError/.test(e.message) ? `not found: ${t.drive.letter}/${t.rel}` : e.message.replace(/^TV: /, '')); }
+    if (!opts.all) entries = entries.filter(e => e.name[0] !== '.');
+    entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const sum = entries.reduce((n, e) => n + (e.dir ? 0 : e.size), 0);
+    console.log(`total ${lsSize(sum)}   (${gb(t.drive.free)} free of ${gb(t.drive.cap)} on ${t.drive.letter}, ${t.drive.root}/${t.rel})`);
+    for (const e of entries) {
+        const mode = e.dir ? 'drwx' : e.ro ? '-r--' : '-rw-';
+        console.log(`${mode}  ${(e.dir ? '-' : lsSize(e.size)).padStart(5)} ${lsDate(e.mtime)} ${e.name}${e.dir ? '/' : ''}`);
+    }
+}
+
+async function cmdPush(app, tv, args, opts) {
+    const [dirSpec, ...files] = args;
+    const drives = await loadDrives(app);
+    const t = target(drives, dirSpec, opts);
+
+    // This PC as the TV sees it: the interface on the TV's subnet.
+    const pc = process.env.TESSEL_PC || myIPs().find(a => a.split('.').slice(0, 3).join('.') === tv.ip.split('.').slice(0, 3).join('.')) || myIPs()[0];
+    if (!pc) die("cannot tell this PC's LAN address; set TESSEL_PC=…");
+
+    // serve exactly the given files, nothing else
+    const byName = new Map();
+    for (const f of files) {
+        const path = resolve(f);
+        let st; try { st = await stat(path); } catch (e) { die(`no such file: ${f}`); }
+        if (!st.isFile()) die(`not a file: ${f}`);
+        byName.set(basename(path), { path, size: st.size });
+    }
+    const total = [...byName.values()].reduce((n, f) => n + f.size, 0);
+    if (total > t.drive.free) die(`${gb(total)} to send, ${gb(t.drive.free)} free on ${t.drive.letter}`);
+    const server = createServer((req, res) => {
+        const f = byName.get(decodeURIComponent(req.url.slice(1)));
+        if (!f || req.method !== 'GET') { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': f.size });
+        createReadStream(f.path).pipe(res);
+    });
+    await new Promise(r => server.listen(+(process.env.TESSEL_PORT || 0), '0.0.0.0', r));
+    const httpPort = server.address().port;
+
+    // the target folder, created if missing
+    await app.evaluate(`new Promise(function (res, rej) {
+        tizen.filesystem.resolve(${js(t.drive.root)}, function (d) {
+            var parts = ${js(t.rel)} ? ${js(t.rel)}.split('/') : [];
+            for (var i = 0; i < parts.length; i++) {
+                try { d = d.resolve(parts[i]); } catch (e) { d = d.createDirectory(parts[i]); }
+            }
+            res(d.fullPath);
+        }, rej, 'rw'); })`);
+    console.log(`→ ${tv.name}  ${t.drive.letter}/${t.rel}  (${gb(t.drive.free)} free)`);
+
+    // one file at a time
+    const sizeOf = path => app.evaluate(`new Promise(function (res) {
+        tizen.filesystem.resolve(${js(path)}, function (f) { res(f.fileSize); }, function () { res(-1); }, 'r'); })`);
+    let failed = 0;
+    for (const [name, f] of byName) {
+        const dest = t.path + '/' + name;
+        if (await sizeOf(dest) === f.size) { console.log(`= ${name} (${mb(f.size)}) already there`); continue; }
+        const url = `http://${pc}:${httpPort}/${encodeURIComponent(name)}`;
+        const t0 = Date.now();
+        await app.evaluate(`(function () {
+            var st = window.__tesselRemote = { done: false };
+            var req = new tizen.DownloadRequest(${js(url)}, ${js(t.path)}, ${js(name)});
+            st.id = tizen.download.start(req, {
+                onprogress:  function (id, r) { st.received = r; },
+                oncompleted: function (id, path) { st.done = true; st.path = path; },
+                onfailed:    function (id, e) { st.done = true; st.error = e.name + ': ' + e.message; },
+                oncanceled:  function (id) { st.done = true; st.error = 'canceled'; }
+            });
+            return st.id; })()`);
+        let st;
+        do {
+            await new Promise(r => setTimeout(r, 1000));
+            st = await app.evaluate('window.__tesselRemote');
+            const pct = st.received ? Math.round(100 * st.received / f.size) : 0;
+            const rate = st.received ? (st.received / 1048576 / ((Date.now() - t0) / 1000)).toFixed(1) : '?';
+            process.stdout.write(`\r↑ ${name} (${mb(f.size)})  ${pct}%  ${rate} MB/s   `);
+        } while (!st.done);
+        const got = await sizeOf(dest);
+        const secs = Math.max(1, (Date.now() - t0) / 1000);
+        if (st.error || got !== f.size) { failed++; console.log(`\r✗ ${name}: ${st.error || 'size on the stick ' + got + ', expected ' + f.size}      `); }
+        else console.log(`\r✓ ${name} (${mb(f.size)}) in ${secs.toFixed(0)}s, ${(f.size / 1048576 / secs).toFixed(1)} MB/s      `);
+    }
+    server.close();
+    return failed;
+}
+
+/* Stat path on the stick; return {exists, isDir}. */
+const statPath = (app, path) => app.evaluate(`new Promise(function (res, rej) {
+    tizen.filesystem.resolve(${js(path)}, function (f) { res({ exists: true, isDir: !!f.isDirectory }); },
+        function (e) { if (e && e.name === 'NotFoundError') res({ exists: false }); else rej(e); }, 'r'); })`);
+
+/* rm [-r] <path>...: every path is checked first; nothing is removed unless
+ * all of them are files, or folders with -r. */
+async function cmdRm(app, args, opts) {
+    if (!args.length) die(USAGE, 2);
+    const drives = await loadDrives(app);
+    const plan = [];
+    for (const a of args) {
+        const t = target(drives, a, opts);
+        if (!t.rel) die(`refusing to remove the whole drive ${t.drive.letter} (${t.drive.root})`);
+        const st = await statPath(app, t.path);
+        if (!st.exists) die(`not found: ${t.drive.letter}/${t.rel}`);
+        if (st.isDir && !opts.recursive) die(`${t.drive.letter}/${t.rel} is a folder, use -r to remove it with everything in it`);
+        plan.push({ ...t, isDir: st.isDir });
+    }
+    for (const t of plan) {
+        await app.evaluate(`new Promise(function (res, rej) {
+            tizen.filesystem.resolve(${js(t.drive.root)}, function (root) {
+                ${t.isDir ? `root.deleteDirectory(${js(t.path)}, true, res, rej);` : `root.deleteFile(${js(t.path)}, res, rej);`}
+            }, rej, 'rw'); })`);
+        console.log(`removed ${t.drive.letter}/${t.rel}${t.isDir ? '/' : ''}`);
+    }
+}
+
+/* mv <from> <to>: a rename, or a move into an existing folder.  Never
+ * overwrites, never leaves the drive. */
+async function cmdMv(app, args, opts) {
+    if (args.length !== 2) die(USAGE, 2);
+    const drives = await loadDrives(app);
+    const src = target(drives, args[0], opts);
+    const dst = target(drives, args[1], opts);
+    if (src.drive !== dst.drive) die(`${src.drive.letter}/${src.rel} and ${dst.drive.letter}/${dst.rel} are on different drives; the TV would copy, not move. Refusing.`);
+    const sst = await statPath(app, src.path);
+    if (!sst.exists) die(`not found: ${src.drive.letter}/${src.rel}`);
+    const dstat = await statPath(app, dst.path);
+    const plan = movePlan({ rel: src.rel, isDir: sst.isDir }, { rel: dst.rel, exists: dstat.exists, isDir: dstat.isDir });
+    if (plan.error) die(plan.error);
+    const toPath = src.drive.root + '/' + plan.to;
+    const parent = toPath.slice(0, toPath.lastIndexOf('/'));
+    const pst = await statPath(app, parent);
+    if (!pst.exists || !pst.isDir) die(`no such folder: ${src.drive.letter}/${plan.to.split('/').slice(0, -1).join('/')}`);
+    if ((await statPath(app, toPath)).exists) die(`${src.drive.letter}/${plan.to} exists, not overwriting`);
+    await app.evaluate(`new Promise(function (res, rej) {
+        tizen.filesystem.resolve(${js(src.drive.root)}, function (root) {
+            root.moveTo(${js(src.path)}, ${js(toPath)}, false, res, rej);
+        }, rej, 'rw'); })`);
+    if (!(await statPath(app, toPath)).exists) die(`the TV reported success but ${src.drive.letter}/${plan.to} is not there`);
+    console.log(`${src.drive.letter}/${src.rel} → ${src.drive.letter}/${plan.to}${sst.isDir ? '/' : ''}`);
+    if (!sst.isDir) console.log(`note: Tessel keeps watched state and resume position by path; the moved file starts fresh`);
+}
+
+/* ── main ───────────────────────────────────────────────────────────────── */
+
+(async () => {
+    const { cmd, args, opts } = parseArgs(process.argv.slice(2));
+    if (!['tvs', 'drives', 'ls', 'push', 'rm', 'mv'].includes(cmd)) die(USAGE, 2);
+    if (cmd === 'push' && args.length < 2) die(USAGE, 2);
+    if (cmd === 'rm' && !args.length) die(USAGE, 2);
+    if (cmd === 'mv' && args.length !== 2) die(USAGE, 2);
+    const cache = cacheRead();
+
+    if (cmd === 'tvs') {
+        const tvs = await findTVs();
+        if (!tvs.length) { console.log('no Samsung TV answered on this LAN'); return; }
+        for (const t of tvs)
+            console.log(`  ${t.ip.padEnd(15)}  ${t.name}  ${t.model}  ${t.devMode ? 'developer mode on (' + t.devIP + ')' : 'developer mode OFF'}${cache.tv === t.ip ? '  [remembered]' : ''}`);
+        return;
+    }
+
+    const tv = await chooseTV(opts, cache);
+    const app = await connectApp(tv, opts, cache);
+    let code = 0;
+    try {
+        if (cmd === 'drives') showDrives(await loadDrives(app));
+        else if (cmd === 'ls') await cmdLs(app, args, opts);
+        else if (cmd === 'rm') await cmdRm(app, args, opts);
+        else if (cmd === 'mv') await cmdMv(app, args, opts);
+        else code = (await cmdPush(app, tv, args, opts)) ? 1 : 0;
+    } catch (e) { console.error(e.message); code = 1; }
+    app.close();
+    process.exit(code);
+})();
